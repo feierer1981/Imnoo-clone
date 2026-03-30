@@ -11,7 +11,7 @@ function Registrierung() {
     passwortBestaetigen: '',
   });
   const [error, setError] = useState('');
-  const { login } = useAuth();
+  const { register } = useAuth();
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -39,11 +39,16 @@ function Registrierung() {
     }
 
     try {
-      // Mock-Registrierung: Benutzer direkt anmelden
-      await login(form.email, form.passwort);
+      await register(form.name, form.email, form.passwort);
       navigate('/');
-    } catch {
-      setError('Registrierung fehlgeschlagen.');
+    } catch (err) {
+      if (err.code === 'auth/email-already-in-use') {
+        setError('Diese E-Mail-Adresse wird bereits verwendet.');
+      } else if (err.code === 'auth/weak-password') {
+        setError('Das Passwort ist zu schwach.');
+      } else {
+        setError('Registrierung fehlgeschlagen.');
+      }
     }
   };
 

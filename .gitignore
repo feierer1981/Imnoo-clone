@@ -25,3 +25,10 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Firebase
+.firebase/
+firebase-debug.log
+
+# Frontend build
+frontend/dist/

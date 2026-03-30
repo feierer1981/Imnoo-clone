@@ -21,8 +21,8 @@ function Login() {
     try {
       await login(email, password);
       navigate('/');
-    } catch {
-      setError('Anmeldung fehlgeschlagen.');
+    } catch (err) {
+      setError('E-Mail oder Passwort falsch.');
     }
   };
 

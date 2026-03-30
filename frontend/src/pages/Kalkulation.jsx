@@ -1,4 +1,6 @@
 import { useState, useMemo } from 'react';
+import { createKalkulation } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 // Verfuegbare Materialien fuer die Auswahl
 const materialien = [
@@ -16,6 +18,8 @@ const toleranzen = ['±0.1mm', '±0.05mm', '±0.01mm'];
 const oberflaechen = ['Ra 3.2', 'Ra 1.6', 'Ra 0.8'];
 
 function Kalkulation() {
+  const { user } = useAuth();
+  const [gespeichert, setGespeichert] = useState(false);
   const [form, setForm] = useState({
     name: '',
     beschreibung: '',
@@ -334,10 +338,31 @@ function Kalkulation() {
               </div>
             </div>
 
+            {/* Erfolgs-Meldung */}
+            {gespeichert && (
+              <div className="mt-4 bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg p-3">
+                Kalkulation erfolgreich gespeichert!
+              </div>
+            )}
+
             {/* Angebot erstellen Button */}
             <button
               className="w-full mt-6 bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 px-4 rounded-lg transition-colors text-sm"
-              onClick={() => alert('Angebot wird erstellt (Platzhalter)')}
+              onClick={async () => {
+                try {
+                  await createKalkulation({
+                    ...form,
+                    stueckpreis: kalkulation.stueckpreis,
+                    gesamtpreis: kalkulation.gesamtpreis,
+                    gesamtzeit: kalkulation.gesamtzeit,
+                    uid: user?.uid || null,
+                  });
+                  setGespeichert(true);
+                  setTimeout(() => setGespeichert(false), 3000);
+                } catch (err) {
+                  alert('Fehler beim Speichern: ' + err.message);
+                }
+              }}
             >
               Angebot erstellen
             </button>
