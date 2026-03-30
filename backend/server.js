@@ -1,6 +1,7 @@
 // Hauptserver-Datei fuer den CNC-Kalkulator
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
@@ -9,6 +10,9 @@ const PORT = process.env.PORT || 5000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Frontend-Build ausliefern (Production-Modus)
+app.use(express.static(path.join(__dirname, '../frontend/dist')));
 
 // Routen einbinden
 const authRoutes = require('./src/routes/auth');
@@ -40,12 +44,9 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404-Handler fuer unbekannte Routen
-app.use((req, res) => {
-  res.status(404).json({
-    erfolg: false,
-    nachricht: `Route ${req.method} ${req.originalUrl} nicht gefunden`
-  });
+// Alle nicht-API-Routen an das Frontend weiterleiten (SPA-Fallback)
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
 });
 
 app.listen(PORT, () => {
