@@ -22,32 +22,61 @@ export async function initOCCT() {
  * @returns {Object} OpenCascade TopoDS_Shape
  */
 async function readStepFile(oc, file) {
-  // STEP ist ein Textformat – als Text einlesen
-  const text = await file.text();
+  const buffer = await file.arrayBuffer();
+  const uint8 = new Uint8Array(buffer);
 
-  // Sicheren Dateinamen ohne Sonderzeichen verwenden
-  const filename = 'upload.step';
-  oc.FS.writeFile(filename, text);
+  // Datei als Binary ins Emscripten-Filesystem schreiben
+  const filename = '/upload.step';
 
-  // STEP-Reader konfigurieren und Datei einlesen
+  // Sicherstellen dass vorherige Datei geloescht ist
+  try { oc.FS.unlink(filename); } catch { /* existiert nicht */ }
+
+  oc.FS.writeFile(filename, uint8);
+
+  // Debug: Dateigroesse pruefen
+  const stat = oc.FS.stat(filename);
+  console.log('STEP Datei geschrieben:', stat.size, 'bytes');
+
+  // STEP-Reader konfigurieren
   const reader = new oc.STEPControl_Reader_1();
-  const status = reader.ReadFile(filename);
 
-  // Enum-Vergleich: In opencascade.js muessen .value verglichen werden
-  const done = oc.IFSelect_ReturnStatus.IFSelect_RetDone;
-  if (status.value !== undefined ? status.value !== done.value : status !== done) {
+  // ReadFile ausfuehren – gibt IFSelect_ReturnStatus zurueck
+  const status = reader.ReadFile(filename);
+  const statusVal = status.value !== undefined ? status.value : status;
+  const doneVal = oc.IFSelect_ReturnStatus.IFSelect_RetDone;
+  const doneNum = doneVal.value !== undefined ? doneVal.value : doneVal;
+
+  console.log('STEP ReadFile status:', statusVal, '(erwartet:', doneNum, ')');
+
+  if (statusVal !== doneNum) {
     oc.FS.unlink(filename);
-    console.error('STEP ReadFile status:', status);
-    throw new Error('STEP-Datei konnte nicht gelesen werden. Bitte Format pruefen.');
+
+    // Detaillierte Fehlermeldung
+    const statusNames = ['RetVoid', 'RetDone', 'RetError', 'RetFail', 'RetStop'];
+    const statusName = statusNames[statusVal] || 'Unbekannt';
+    throw new Error(
+      `STEP-Reader Fehler: ${statusName} (Code ${statusVal}). ` +
+      'Bitte pruefen ob die Datei ein gueltiges STEP AP203/AP214 Format hat.'
+    );
   }
 
-  // Alle Wurzeln uebertragen und Shape erstellen
+  // Anzahl der erkannten Wurzeln pruefen
+  const nbRoots = reader.NbRootsForTransfer();
+  console.log('STEP Wurzeln gefunden:', nbRoots);
+
+  if (nbRoots === 0) {
+    oc.FS.unlink(filename);
+    throw new Error('STEP-Datei enthaelt keine uebertragbaren Geometrien.');
+  }
+
+  // Alle Wurzeln uebertragen
   reader.TransferRoots(new oc.Message_ProgressRange_1());
   const shape = reader.OneShape();
 
-  // Temporaere Datei aufraeumen
+  // Aufraeumen
   oc.FS.unlink(filename);
 
+  console.log('STEP Shape geladen, Typ:', shape.ShapeType().value);
   return shape;
 }
 
