@@ -1,0 +1,297 @@
+// OpenCascade STEP-Analyse-Service
+// Nutzt opencascade.js (WASM) zum Parsen und Analysieren von STEP-Dateien im Browser
+
+let ocInstance = null;
+
+/**
+ * OpenCascade WASM-Instanz laden (Singleton)
+ * Wird nur beim ersten Aufruf initialisiert, danach gecacht
+ */
+export async function initOCCT() {
+  if (ocInstance) return ocInstance;
+
+  const { initOpenCascade } = await import('opencascade.js');
+  ocInstance = await initOpenCascade();
+  console.log('OpenCascade WASM geladen');
+  return ocInstance;
+}
+
+/**
+ * STEP-Datei einlesen und als OpenCascade Shape zurueckgeben
+ * @param {File} file - Die hochgeladene STEP/STP-Datei
+ * @returns {Object} OpenCascade TopoDS_Shape
+ */
+async function readStepFile(oc, file) {
+  const buffer = await file.arrayBuffer();
+  const uint8 = new Uint8Array(buffer);
+
+  // Datei ins virtuelle Dateisystem von Emscripten schreiben
+  const filename = '/tmp/' + file.name;
+  oc.FS.writeFile(filename, uint8);
+
+  // STEP-Reader konfigurieren und Datei einlesen
+  const reader = new oc.STEPControl_Reader_1();
+  const status = reader.ReadFile(filename);
+
+  if (status !== oc.IFSelect_ReturnStatus.IFSelect_RetDone) {
+    // Temporaere Datei aufraeumen
+    oc.FS.unlink(filename);
+    throw new Error('STEP-Datei konnte nicht gelesen werden. Bitte Format pruefen.');
+  }
+
+  // Alle Wurzeln uebertragen und Shape erstellen
+  reader.TransferRoots(new oc.Message_ProgressRange_1());
+  const shape = reader.OneShape();
+
+  // Temporaere Datei aufraeumen
+  oc.FS.unlink(filename);
+
+  return shape;
+}
+
+/**
+ * Bounding Box eines Shapes berechnen
+ * Gibt Abmessungen in mm zurueck
+ */
+function getBoundingBox(oc, shape) {
+  const bbox = new oc.Bnd_Box_1();
+  const brepTool = new oc.BRepBndLib();
+  brepTool.Add(shape, bbox, false);
+
+  const xMin = { current: 0 };
+  const yMin = { current: 0 };
+  const zMin = { current: 0 };
+  const xMax = { current: 0 };
+  const yMax = { current: 0 };
+  const zMax = { current: 0 };
+
+  bbox.Get(xMin, yMin, zMin, xMax, yMax, zMax);
+
+  return {
+    laenge: Math.abs(xMax.current - xMin.current),
+    breite: Math.abs(yMax.current - yMin.current),
+    hoehe: Math.abs(zMax.current - zMin.current),
+  };
+}
+
+/**
+ * Volumen eines Shapes mit GProp berechnen
+ * @returns {number} Volumen in mm³
+ */
+function getVolume(oc, shape) {
+  const props = new oc.GProp_GProps_1();
+  oc.BRepGProp.VolumeProperties_1(shape, props, false, false, false);
+  return props.Mass(); // Volumen in mm³
+}
+
+/**
+ * Oberflaeche eines Shapes berechnen
+ * @returns {number} Oberflaeche in mm²
+ */
+function getSurfaceArea(oc, shape) {
+  const props = new oc.GProp_GProps_1();
+  oc.BRepGProp.SurfaceProperties_1(shape, props, false, false);
+  return props.Mass(); // Flaeche in mm²
+}
+
+/**
+ * Geometrische Features zaehlen (Flaechen, Kanten, Vertices)
+ */
+function countFeatures(oc, shape) {
+  let faces = 0;
+  let edges = 0;
+  let vertices = 0;
+
+  // Flaechen zaehlen
+  const faceExplorer = new oc.TopExp_Explorer_2(
+    shape,
+    oc.TopAbs_ShapeEnum.TopAbs_FACE,
+    oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+  );
+  while (faceExplorer.More()) {
+    faces++;
+    faceExplorer.Next();
+  }
+
+  // Kanten zaehlen
+  const edgeExplorer = new oc.TopExp_Explorer_2(
+    shape,
+    oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+    oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+  );
+  while (edgeExplorer.More()) {
+    edges++;
+    edgeExplorer.Next();
+  }
+
+  // Vertices zaehlen
+  const vertexExplorer = new oc.TopExp_Explorer_2(
+    shape,
+    oc.TopAbs_ShapeEnum.TopAbs_VERTEX,
+    oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+  );
+  while (vertexExplorer.More()) {
+    vertices++;
+    vertexExplorer.Next();
+  }
+
+  return { faces, edges, vertices };
+}
+
+/**
+ * Zylindrische Flaechen erkennen (potenzielle Bohrungen)
+ * Gibt Anzahl und Liste der Radien zurueck
+ */
+function detectCylinders(oc, shape) {
+  const cylinders = [];
+
+  const explorer = new oc.TopExp_Explorer_2(
+    shape,
+    oc.TopAbs_ShapeEnum.TopAbs_FACE,
+    oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+  );
+
+  while (explorer.More()) {
+    try {
+      const face = oc.TopoDS.Face_1(explorer.Current());
+      const surface = oc.BRep_Tool.Surface_2(face);
+      const surfType = surface.get().DynamicType().get().Name();
+
+      if (surfType.includes('Geom_CylindricalSurface')) {
+        // Radius der zylindrischen Flaeche auslesen
+        const cylSurf = new oc.Handle_Geom_CylindricalSurface_1();
+        // Vereinfacht: Radius ueber BoundingBox der Flaeche schaetzen
+        const faceBbox = new oc.Bnd_Box_1();
+        oc.BRepBndLib.Add(face, faceBbox, false);
+        const fxMin = { current: 0 }, fyMin = { current: 0 }, fzMin = { current: 0 };
+        const fxMax = { current: 0 }, fyMax = { current: 0 }, fzMax = { current: 0 };
+        faceBbox.Get(fxMin, fyMin, fzMin, fxMax, fyMax, fzMax);
+
+        const dx = Math.abs(fxMax.current - fxMin.current);
+        const dy = Math.abs(fyMax.current - fyMin.current);
+        const dims = [dx, dy].sort((a, b) => a - b);
+        const estimatedDiameter = dims[0];
+
+        if (estimatedDiameter > 0.5) {
+          cylinders.push({
+            durchmesser: Math.round(estimatedDiameter * 100) / 100,
+          });
+        }
+      }
+    } catch {
+      // Flaeche konnte nicht analysiert werden, ueberspringen
+    }
+    explorer.Next();
+  }
+
+  return cylinders;
+}
+
+/**
+ * Shape zu Dreiecks-Mesh konvertieren fuer 3D-Vorschau
+ * Gibt Vertices und Indices als Float32Arrays zurueck
+ */
+export function triangulateShape(oc, shape) {
+  const vertices = [];
+  const indices = [];
+
+  // Mesh erzeugen
+  new oc.BRepMesh_IncrementalMesh_2(shape, 0.5, false, 0.5, true);
+
+  const explorer = new oc.TopExp_Explorer_2(
+    shape,
+    oc.TopAbs_ShapeEnum.TopAbs_FACE,
+    oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+  );
+
+  let vertexOffset = 0;
+
+  while (explorer.More()) {
+    try {
+      const face = oc.TopoDS.Face_1(explorer.Current());
+      const location = new oc.TopLoc_Location_1();
+      const triangulation = oc.BRep_Tool.Triangulation(face, location, 0);
+
+      if (!triangulation.IsNull()) {
+        const tri = triangulation.get();
+        const nbNodes = tri.NbNodes();
+        const nbTriangles = tri.NbTriangles();
+
+        // Vertices auslesen
+        for (let i = 1; i <= nbNodes; i++) {
+          const node = tri.Node(i);
+          vertices.push(node.X(), node.Y(), node.Z());
+        }
+
+        // Dreiecks-Indizes auslesen
+        for (let i = 1; i <= nbTriangles; i++) {
+          const triangle = tri.Triangle(i);
+          const orientation = face.Orientation_1();
+          const reversed = orientation === oc.TopAbs_Orientation.TopAbs_REVERSED;
+
+          const i1 = triangle.Value(1) - 1 + vertexOffset;
+          const i2 = triangle.Value(2) - 1 + vertexOffset;
+          const i3 = triangle.Value(3) - 1 + vertexOffset;
+
+          if (reversed) {
+            indices.push(i1, i3, i2);
+          } else {
+            indices.push(i1, i2, i3);
+          }
+        }
+
+        vertexOffset += nbNodes;
+      }
+    } catch {
+      // Flaeche konnte nicht trianguliert werden
+    }
+    explorer.Next();
+  }
+
+  return {
+    vertices: new Float32Array(vertices),
+    indices: new Uint32Array(indices),
+  };
+}
+
+/**
+ * Hauptfunktion: STEP-Datei komplett analysieren
+ * Gibt alle extrahierten Informationen zurueck
+ */
+export async function analyzeStepFile(file) {
+  const oc = await initOCCT();
+
+  // STEP-Datei einlesen
+  const shape = await readStepFile(oc, file);
+
+  // Alle Analysen durchfuehren
+  const boundingBox = getBoundingBox(oc, shape);
+  const volumen = getVolume(oc, shape);
+  const oberflaeche = getSurfaceArea(oc, shape);
+  const features = countFeatures(oc, shape);
+  const bohrungen = detectCylinders(oc, shape);
+
+  // Mesh fuer 3D-Vorschau generieren
+  const mesh = triangulateShape(oc, shape);
+
+  return {
+    // Abmessungen in mm (gerundet auf 2 Dezimalstellen)
+    abmessungen: {
+      laenge: Math.round(boundingBox.laenge * 100) / 100,
+      breite: Math.round(boundingBox.breite * 100) / 100,
+      hoehe: Math.round(boundingBox.hoehe * 100) / 100,
+    },
+    // Volumen in mm³ und cm³
+    volumenMm3: Math.round(volumen * 100) / 100,
+    volumenCm3: Math.round((volumen / 1000) * 100) / 100,
+    // Oberflaeche in mm² und cm²
+    oberflaecheMm2: Math.round(oberflaeche * 100) / 100,
+    oberflaecheCm2: Math.round((oberflaeche / 100) * 100) / 100,
+    // Geometrische Features
+    features,
+    // Erkannte zylindrische Flaechen (potenzielle Bohrungen)
+    bohrungen,
+    // Mesh-Daten fuer 3D-Vorschau
+    mesh,
+  };
+}

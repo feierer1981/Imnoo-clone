@@ -13,4 +13,9 @@ export default defineConfig({
       },
     },
   },
+  // WASM-Dateien fuer OpenCascade korrekt verarbeiten
+  assetsInclude: ['**/*.wasm'],
+  optimizeDeps: {
+    exclude: ['opencascade.js'],
+  },
 });
