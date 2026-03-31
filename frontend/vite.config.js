@@ -13,9 +13,19 @@ export default defineConfig({
       },
     },
   },
-  // WASM-Dateien fuer OpenCascade korrekt verarbeiten
+  // WASM-Dateien korrekt verarbeiten
   assetsInclude: ['**/*.wasm'],
   optimizeDeps: {
     exclude: ['opencascade.js'],
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        // Three.js als separaten Chunk laden (nur bei Bedarf)
+        manualChunks: {
+          three: ['three'],
+        },
+      },
+    },
   },
 });
