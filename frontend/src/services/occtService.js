@@ -13,13 +13,11 @@ async function initOCCT() {
   occtInitPromise = (async () => {
     const occtImportJs = (await import('occt-import-js')).default;
 
-    // WASM-Datei aus dem gleichen Verzeichnis laden
-    const wasmUrl = new URL(
-      '../../node_modules/occt-import-js/dist/occt-import-js.wasm',
-      import.meta.url
-    ).href;
-
-    const wasmResponse = await fetch(wasmUrl);
+    // WASM-Datei aus dem public-Ordner laden (funktioniert lokal und auf Firebase)
+    const wasmResponse = await fetch('/occt-import-js.wasm');
+    if (!wasmResponse.ok) {
+      throw new Error('WASM-Datei konnte nicht geladen werden: ' + wasmResponse.status);
+    }
     const wasmBuffer = await wasmResponse.arrayBuffer();
 
     const occt = await occtImportJs({
