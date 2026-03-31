@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { analyzeStepFile } from '../services/occtService';
+import StepViewer from '../components/StepViewer';
 
 function Upload() {
   const navigate = useNavigate();
@@ -10,7 +11,6 @@ function Upload() {
   const [analysisResult, setAnalysisResult] = useState(null);
   const [error, setError] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
-  const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
 
   // Datei validieren
@@ -76,112 +76,6 @@ function Upload() {
     const file = e.target.files[0];
     if (file) processFile(file);
   };
-
-  // 3D-Vorschau mit Canvas rendern
-  const render3DPreview = useCallback(() => {
-    if (!analysisResult?.mesh || !canvasRef.current) return;
-
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const { vertices, indices } = analysisResult.mesh;
-    const { width, height } = canvas;
-
-    ctx.clearRect(0, 0, width, height);
-
-    if (vertices.length === 0) {
-      ctx.fillStyle = '#6b7280';
-      ctx.font = '14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Keine Mesh-Daten verfuegbar', width / 2, height / 2);
-      return;
-    }
-
-    // Bounding Box fuer Zentrierung berechnen
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-
-    for (let i = 0; i < vertices.length; i += 3) {
-      minX = Math.min(minX, vertices[i]);
-      minY = Math.min(minY, vertices[i + 1]);
-      minZ = Math.min(minZ, vertices[i + 2]);
-      maxX = Math.max(maxX, vertices[i]);
-      maxY = Math.max(maxY, vertices[i + 1]);
-      maxZ = Math.max(maxZ, vertices[i + 2]);
-    }
-
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-    const centerZ = (minZ + maxZ) / 2;
-    const size = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
-    const scale = (Math.min(width, height) * 0.7) / size;
-
-    // Isometrische Projektion (30 Grad)
-    const cosA = Math.cos(0.5);
-    const sinA = Math.sin(0.5);
-    const cosB = Math.cos(0.4);
-    const sinB = Math.sin(0.4);
-
-    const project = (x, y, z) => {
-      const dx = x - centerX;
-      const dy = y - centerY;
-      const dz = z - centerZ;
-      // Rotation um Y-Achse, dann X-Achse
-      const rx = dx * cosA - dz * sinA;
-      const ry = dy * cosB - (dx * sinA + dz * cosA) * sinB;
-      return {
-        px: width / 2 + rx * scale,
-        py: height / 2 - ry * scale,
-        depth: dy * sinB + (dx * sinA + dz * cosA) * cosB,
-      };
-    };
-
-    // Dreiecke mit einfacher Beleuchtung rendern
-    const triangles = [];
-    for (let i = 0; i < indices.length; i += 3) {
-      const i1 = indices[i] * 3;
-      const i2 = indices[i + 1] * 3;
-      const i3 = indices[i + 2] * 3;
-
-      if (i1 + 2 >= vertices.length || i2 + 2 >= vertices.length || i3 + 2 >= vertices.length) continue;
-
-      const p1 = project(vertices[i1], vertices[i1 + 1], vertices[i1 + 2]);
-      const p2 = project(vertices[i2], vertices[i2 + 1], vertices[i2 + 2]);
-      const p3 = project(vertices[i3], vertices[i3 + 1], vertices[i3 + 2]);
-
-      // Normale fuer Beleuchtung berechnen
-      const nx = (p2.py - p1.py) * (p3.px - p1.px) - (p2.px - p1.px) * (p3.py - p1.py);
-      const avgDepth = (p1.depth + p2.depth + p3.depth) / 3;
-
-      triangles.push({ p1, p2, p3, nx, depth: avgDepth });
-    }
-
-    // Painter's algorithm (hintere Dreiecke zuerst)
-    triangles.sort((a, b) => a.depth - b.depth);
-
-    for (const tri of triangles) {
-      // Einfache Beleuchtung basierend auf Flaechennormale
-      const brightness = Math.max(0.3, Math.min(1, tri.nx > 0 ? 0.8 : 0.5));
-      const r = Math.round(99 * brightness);
-      const g = Math.round(102 * brightness);
-      const b = Math.round(241 * brightness);
-
-      ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-      ctx.strokeStyle = `rgba(${r - 20}, ${g - 20}, ${b - 20}, 0.3)`;
-      ctx.lineWidth = 0.5;
-
-      ctx.beginPath();
-      ctx.moveTo(tri.p1.px, tri.p1.py);
-      ctx.lineTo(tri.p2.px, tri.p2.py);
-      ctx.lineTo(tri.p3.px, tri.p3.py);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-    }
-  }, [analysisResult]);
-
-  useEffect(() => {
-    render3DPreview();
-  }, [render3DPreview]);
 
   // Ergebnisse an Kalkulation uebergeben
   const handleUebernahme = () => {
@@ -289,21 +183,10 @@ function Upload() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* 3D-Vorschau */}
+            {/* 3D-Vorschau mit Three.js */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <h2 className="text-lg font-semibold text-gray-800 mb-4">3D-Vorschau</h2>
-              <div className="bg-gray-50 rounded-lg overflow-hidden">
-                <canvas
-                  ref={canvasRef}
-                  width={500}
-                  height={400}
-                  className="w-full"
-                  style={{ aspectRatio: '5/4' }}
-                />
-              </div>
-              <p className="text-xs text-gray-400 mt-2 text-center">
-                Isometrische Ansicht (Canvas 2D)
-              </p>
+              <StepViewer meshData={analysisResult.mesh} height={400} />
             </div>
 
             {/* Abmessungen & Volumen */}
