@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { createKalkulation } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -19,7 +20,9 @@ const oberflaechen = ['Ra 3.2', 'Ra 1.6', 'Ra 0.8'];
 
 function Kalkulation() {
   const { user } = useAuth();
+  const location = useLocation();
   const [gespeichert, setGespeichert] = useState(false);
+  const [stepInfo, setStepInfo] = useState(null);
   const [form, setForm] = useState({
     name: '',
     beschreibung: '',
@@ -31,6 +34,28 @@ function Kalkulation() {
     toleranz: toleranzen[0],
     oberflaeche: oberflaechen[0],
   });
+
+  // Daten aus der STEP-Analyse uebernehmen (von Upload-Seite)
+  useEffect(() => {
+    const state = location.state;
+    if (state?.fromUpload) {
+      setForm((prev) => ({
+        ...prev,
+        name: state.dateiname?.replace(/\.[^.]+$/, '') || prev.name,
+        laenge: String(state.laenge || ''),
+        breite: String(state.breite || ''),
+        hoehe: String(state.hoehe || ''),
+      }));
+      setStepInfo({
+        dateiname: state.dateiname,
+        features: state.features,
+        bohrungen: state.bohrungen,
+        volumenCm3: state.volumenCm3,
+      });
+      // State bereinigen damit bei Seitenreload keine Daten uebernommen werden
+      window.history.replaceState({}, '');
+    }
+  }, [location.state]);
 
   // Formularfeld aktualisieren
   const handleChange = (e) => {
@@ -89,6 +114,30 @@ function Kalkulation() {
           CNC-Fertigungskosten berechnen
         </p>
       </div>
+
+      {/* STEP-Daten Info-Banner */}
+      {stepInfo && (
+        <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            <span className="text-green-800 font-medium">
+              Abmessungen aus STEP-Datei uebernommen: {stepInfo.dateiname}
+            </span>
+          </div>
+          <div className="text-sm text-green-700 flex flex-wrap gap-4">
+            <span>{stepInfo.features?.faces} Flaechen</span>
+            <span>{stepInfo.features?.edges} Kanten</span>
+            {stepInfo.bohrungen?.length > 0 && (
+              <span>{stepInfo.bohrungen.length} zylindrische Flaechen erkannt</span>
+            )}
+            {stepInfo.volumenCm3 && (
+              <span>Exaktes Volumen: {stepInfo.volumenCm3} cm&sup3;</span>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Linke Seite: Formular (2/3 Breite) */}
