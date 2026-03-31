@@ -242,54 +242,146 @@ function Upload() {
 
           {/* Feature-Erkennung */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Geometrische Merkmale */}
+            {/* Flaechentypen-Uebersicht */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-              <h2 className="text-lg font-semibold text-gray-800 mb-4">Geometrische Merkmale</h2>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="text-center p-3 bg-gray-50 rounded-lg">
-                  <p className="text-3xl font-bold text-gray-800">{analysisResult.features.faces}</p>
-                  <p className="text-xs text-gray-500 mt-1">Flaechen</p>
+              <h2 className="text-lg font-semibold text-gray-800 mb-4">Flaechentypen</h2>
+              {analysisResult.features.faceTypes && (
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  {analysisResult.features.faceTypes.planar > 0 && (
+                    <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+                      <span className="text-sm text-blue-700">Planare Flaechen</span>
+                      <span className="text-lg font-bold text-blue-800">{analysisResult.features.faceTypes.planar}</span>
+                    </div>
+                  )}
+                  {analysisResult.features.faceTypes.zylindrisch > 0 && (
+                    <div className="flex items-center justify-between p-3 bg-amber-50 rounded-lg">
+                      <span className="text-sm text-amber-700">Zylindrische</span>
+                      <span className="text-lg font-bold text-amber-800">{analysisResult.features.faceTypes.zylindrisch}</span>
+                    </div>
+                  )}
+                  {analysisResult.features.faceTypes.konisch > 0 && (
+                    <div className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
+                      <span className="text-sm text-orange-700">Konische</span>
+                      <span className="text-lg font-bold text-orange-800">{analysisResult.features.faceTypes.konisch}</span>
+                    </div>
+                  )}
+                  {analysisResult.features.faceTypes.sphaerisch > 0 && (
+                    <div className="flex items-center justify-between p-3 bg-purple-50 rounded-lg">
+                      <span className="text-sm text-purple-700">Sphaerische</span>
+                      <span className="text-lg font-bold text-purple-800">{analysisResult.features.faceTypes.sphaerisch}</span>
+                    </div>
+                  )}
+                  {analysisResult.features.faceTypes.freiform > 0 && (
+                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <span className="text-sm text-gray-600">Freiform</span>
+                      <span className="text-lg font-bold text-gray-800">{analysisResult.features.faceTypes.freiform}</span>
+                    </div>
+                  )}
                 </div>
-                <div className="text-center p-3 bg-gray-50 rounded-lg">
-                  <p className="text-3xl font-bold text-gray-800">{analysisResult.features.edges}</p>
-                  <p className="text-xs text-gray-500 mt-1">Kanten</p>
+              )}
+              <div className="grid grid-cols-3 gap-3 pt-3 border-t border-gray-100">
+                <div className="text-center p-2">
+                  <p className="text-2xl font-bold text-gray-800">{analysisResult.features.faces}</p>
+                  <p className="text-xs text-gray-500">Flaechen</p>
                 </div>
-                <div className="text-center p-3 bg-gray-50 rounded-lg">
-                  <p className="text-3xl font-bold text-gray-800">{analysisResult.features.vertices}</p>
-                  <p className="text-xs text-gray-500 mt-1">Eckpunkte</p>
+                <div className="text-center p-2">
+                  <p className="text-2xl font-bold text-gray-800">{analysisResult.features.triangles}</p>
+                  <p className="text-xs text-gray-500">Dreiecke</p>
+                </div>
+                <div className="text-center p-2">
+                  <p className="text-2xl font-bold text-gray-800">{analysisResult.features.vertices}</p>
+                  <p className="text-xs text-gray-500">Vertices</p>
                 </div>
               </div>
             </div>
 
-            {/* Erkannte Bohrungen */}
+            {/* Erkannte Geometrie-Features */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <h2 className="text-lg font-semibold text-gray-800 mb-4">
-                Erkannte zylindrische Flaechen
+                Erkannte Geometrie-Features
               </h2>
-              {analysisResult.bohrungen.length > 0 ? (
-                <div className="space-y-2">
-                  {analysisResult.bohrungen.map((b, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between py-2 px-3 bg-amber-50 rounded-lg"
-                    >
-                      <span className="text-sm text-amber-800">
-                        Zylinder #{i + 1}
-                      </span>
-                      <span className="text-sm font-semibold text-amber-900">
-                        &oslash; {b.durchmesser} mm
-                      </span>
-                    </div>
-                  ))}
-                  <p className="text-xs text-gray-400 mt-2">
-                    Hinweis: Zylinder koennen Bohrungen, Wellen oder Rundungen sein.
-                  </p>
+
+              {/* Zylinder / Bohrungen */}
+              {analysisResult.bohrungen.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-medium text-gray-600 mb-2">
+                    Zylindrische Flaechen ({analysisResult.bohrungen.length})
+                  </h3>
+                  <div className="space-y-1.5">
+                    {analysisResult.bohrungen.map((b, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center justify-between py-2 px-3 bg-amber-50 rounded-lg text-sm"
+                      >
+                        <span className="text-amber-800">
+                          &oslash; {b.durchmesser} mm
+                          {b.anzahl > 1 && <span className="text-amber-600 ml-1">(&times;{b.anzahl})</span>}
+                        </span>
+                        <span className="text-amber-700">
+                          H: {b.hoehe} mm
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ) : (
+              )}
+
+              {/* Konen */}
+              {analysisResult.konen?.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-medium text-gray-600 mb-2">
+                    Konische Flaechen ({analysisResult.konen.length})
+                  </h3>
+                  <div className="space-y-1.5">
+                    {analysisResult.konen.map((k, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center justify-between py-2 px-3 bg-orange-50 rounded-lg text-sm"
+                      >
+                        <span className="text-orange-800">Konus #{i + 1}</span>
+                        <span className="text-orange-700">
+                          &oslash; {k.radiusUnten * 2} &rarr; {k.radiusOben * 2} mm
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Sphaeren */}
+              {analysisResult.sphaeren?.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-medium text-gray-600 mb-2">
+                    Sphaerische Flaechen ({analysisResult.sphaeren.length})
+                  </h3>
+                  <div className="space-y-1.5">
+                    {analysisResult.sphaeren.map((s, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center justify-between py-2 px-3 bg-purple-50 rounded-lg text-sm"
+                      >
+                        <span className="text-purple-800">Kugel #{i + 1}</span>
+                        <span className="text-purple-700">
+                          &oslash; {s.durchmesser} mm
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Keine Features */}
+              {analysisResult.bohrungen.length === 0 &&
+               (!analysisResult.konen || analysisResult.konen.length === 0) &&
+               (!analysisResult.sphaeren || analysisResult.sphaeren.length === 0) && (
                 <p className="text-gray-500 text-sm">
-                  Keine zylindrischen Flaechen erkannt.
+                  Nur planare und Freiform-Flaechen erkannt.
                 </p>
               )}
+
+              <p className="text-xs text-gray-400 mt-3">
+                Erkennung basiert auf Normalen- und Kruemmungsanalyse der Mesh-Daten.
+              </p>
             </div>
           </div>
 
