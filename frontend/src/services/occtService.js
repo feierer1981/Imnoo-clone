@@ -252,7 +252,7 @@ function computePropsBrep(oc, shape) {
 
 // ─── Mesh fuer 3D-Vorschau (occt-import-js) ──────────────────────────────────
 
-async function getMesh(uint8) {
+async function parseMeshData(uint8) {
   const occtImport = await initOcctImport();
   const result = occtImport.ReadStepFile(uint8, null);
 
@@ -271,39 +271,152 @@ async function getMesh(uint8) {
   }
 
   return {
-    vertices: new Float32Array(allVertices),
-    indices:  new Uint32Array(allIndices),
+    combinedMesh: {
+      vertices: new Float32Array(allVertices),
+      indices:  new Uint32Array(allIndices),
+    },
+    rawMeshes: result.meshes,
   };
 }
 
-// ─── Hauptfunktion ────────────────────────────────────────────────────────────
+// ─── Fallback: Mesh-basierte Analyse wenn B-Rep scheitert ────────────────────
 
-export async function analyzeStepFile(file) {
-  // Datei einmal lesen
-  const buffer = await file.arrayBuffer();
-  const uint8 = new Uint8Array(buffer);
-  console.log('analyzeStepFile:', file.name, uint8.length, 'bytes');
+function analyzeMeshFallback(meshes) {
+  // Bounding Box aus allen Vertices
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  let totalVolume = 0;
+  let totalArea = 0;
 
-  // Beide WASM-Module parallel laden + Mesh parallel generieren
-  const [oc, mesh] = await Promise.all([
-    initOC(),
-    getMesh(uint8),
-  ]);
+  for (const mesh of meshes) {
+    const v = mesh.attributes.position.array;
+    const idx = mesh.index.array;
 
-  // B-Rep Shape einlesen
-  const shape = await readStepShape(oc, uint8);
+    for (let i = 0; i < v.length; i += 3) {
+      if (v[i] < minX) minX = v[i];
+      if (v[i+1] < minY) minY = v[i+1];
+      if (v[i+2] < minZ) minZ = v[i+2];
+      if (v[i] > maxX) maxX = v[i];
+      if (v[i+1] > maxY) maxY = v[i+1];
+      if (v[i+2] > maxZ) maxZ = v[i+2];
+    }
 
-  // B-Rep Analysen
-  const bbox              = computeBBoxBrep(oc, shape);
-  const { volumen, oberflaeche } = computePropsBrep(oc, shape);
-  const { features, zylinder, konen, sphaeren } = detectFeaturesBrep(oc, shape);
+    // Volumen (Divergenztheorem) und Oberflaeche aus Dreiecken
+    for (let i = 0; i < idx.length; i += 3) {
+      const a = idx[i]*3, b = idx[i+1]*3, c = idx[i+2]*3;
+      const ax = v[a], ay = v[a+1], az = v[a+2];
+      const bx = v[b], by = v[b+1], bz = v[b+2];
+      const cx = v[c], cy = v[c+1], cz = v[c+2];
 
-  console.log('STEP Analyse fertig:', {
-    abmessungen: bbox,
-    volumenCm3: (volumen / 1000).toFixed(2),
-    faceTypes: features.faceTypes,
-    zylinder: zylinder.length,
-  });
+      totalVolume += (ax*(by*cz - bz*cy) + bx*(cy*az - cz*ay) + cx*(ay*bz - az*by)) / 6.0;
+
+      const abx = bx-ax, aby = by-ay, abz = bz-az;
+      const acx = cx-ax, acy = cy-ay, acz = cz-az;
+      const nx = aby*acz - abz*acy;
+      const ny = abz*acx - abx*acz;
+      const nz = abx*acy - aby*acx;
+      totalArea += Math.sqrt(nx*nx + ny*ny + nz*nz) / 2.0;
+    }
+  }
+
+  const bbox = {
+    laenge: Math.abs(maxX - minX),
+    breite: Math.abs(maxY - minY),
+    hoehe:  Math.abs(maxZ - minZ),
+  };
+
+  // Pro-Face Normalenanalyse fuer Feature-Erkennung
+  const faceTypes = { planar: 0, zylindrisch: 0, konisch: 0, sphaerisch: 0, toroidal: 0, freiform: 0 };
+  const zylinder = [];
+
+  for (const mesh of meshes) {
+    const v = mesh.attributes.position.array;
+    const idx = mesh.index.array;
+    const numVerts = v.length / 3;
+    if (numVerts < 3) { faceTypes.freiform++; continue; }
+
+    // Normalen aller Dreiecke dieser Flaeche berechnen
+    const normals = [];
+    for (let i = 0; i < idx.length; i += 3) {
+      const a = idx[i]*3, b = idx[i+1]*3, c = idx[i+2]*3;
+      const abx = v[b]-v[a], aby = v[b+1]-v[a+1], abz = v[b+2]-v[a+2];
+      const acx = v[c]-v[a], acy = v[c+1]-v[a+1], acz = v[c+2]-v[a+2];
+      const nx = aby*acz - abz*acy;
+      const ny = abz*acx - abx*acz;
+      const nz = abx*acy - aby*acx;
+      const len = Math.sqrt(nx*nx + ny*ny + nz*nz);
+      if (len > 1e-10) normals.push([nx/len, ny/len, nz/len]);
+    }
+
+    if (normals.length < 1) { faceTypes.freiform++; continue; }
+
+    // Pruefen ob alle Normalen parallel sind (= planare Flaeche)
+    const ref = normals[0];
+    let allParallel = true;
+    for (const n of normals) {
+      const dot = Math.abs(ref[0]*n[0] + ref[1]*n[1] + ref[2]*n[2]);
+      if (dot < 0.98) { allParallel = false; break; }
+    }
+
+    if (allParallel) {
+      faceTypes.planar++;
+      continue;
+    }
+
+    // Zylindertest: Mittelpunkt und Radien berechnen
+    let cx = 0, cy = 0, cz = 0;
+    for (let i = 0; i < numVerts; i++) {
+      cx += v[i*3]; cy += v[i*3+1]; cz += v[i*3+2];
+    }
+    cx /= numVerts; cy /= numVerts; cz /= numVerts;
+
+    // Fuer jede Hauptachse testen ob Radien konsistent sind
+    const axes = [[1,0,0],[0,1,0],[0,0,1]];
+    let bestFit = null;
+
+    for (const axis of axes) {
+      const radii = [];
+      const projs = [];
+      for (let i = 0; i < numVerts; i++) {
+        const dx = v[i*3]-cx, dy = v[i*3+1]-cy, dz = v[i*3+2]-cz;
+        const proj = dx*axis[0] + dy*axis[1] + dz*axis[2];
+        const px = dx - proj*axis[0], py = dy - proj*axis[1], pz = dz - proj*axis[2];
+        radii.push(Math.sqrt(px*px + py*py + pz*pz));
+        projs.push(proj);
+      }
+
+      const avgR = radii.reduce((s,r) => s+r, 0) / radii.length;
+      if (avgR < 0.1) continue;
+
+      const variance = radii.reduce((s,r) => s + (r-avgR)**2, 0) / radii.length;
+      const cv = Math.sqrt(variance) / avgR;
+
+      if (cv < 0.15 && (!bestFit || cv < bestFit.cv)) {
+        const minP = Math.min(...projs);
+        const maxP = Math.max(...projs);
+        bestFit = { avgR, cv, hoehe: maxP - minP };
+      }
+    }
+
+    if (bestFit && bestFit.avgR > 0.1) {
+      faceTypes.zylindrisch++;
+      zylinder.push({
+        radius: Math.round(bestFit.avgR * 100) / 100,
+        durchmesser: Math.round(bestFit.avgR * 2 * 100) / 100,
+        hoehe: Math.round(bestFit.hoehe * 100) / 100,
+      });
+    } else {
+      faceTypes.freiform++;
+    }
+  }
+
+  // Zylinder gruppieren
+  const zylinderGruppiert = [];
+  for (const z of zylinder.sort((a,b) => a.durchmesser - b.durchmesser)) {
+    const existing = zylinderGruppiert.find(g => Math.abs(g.durchmesser - z.durchmesser) < 0.5);
+    if (existing) { existing.anzahl++; existing.hoehe = Math.max(existing.hoehe, z.hoehe); }
+    else zylinderGruppiert.push({ ...z, anzahl: 1 });
+  }
 
   return {
     abmessungen: {
@@ -311,14 +424,74 @@ export async function analyzeStepFile(file) {
       breite: Math.round(bbox.breite * 100) / 100,
       hoehe:  Math.round(bbox.hoehe  * 100) / 100,
     },
-    volumenMm3:      Math.round(volumen * 100) / 100,
-    volumenCm3:      Math.round((volumen / 1000) * 100) / 100,
-    oberflaecheMm2:  Math.round(oberflaeche * 100) / 100,
-    oberflaecheCm2:  Math.round((oberflaeche / 100) * 100) / 100,
-    features,
-    bohrungen: zylinder,
-    konen,
-    sphaeren,
-    mesh: mesh || { vertices: new Float32Array(0), indices: new Uint32Array(0) },
+    volumenMm3:     Math.round(Math.abs(totalVolume) * 100) / 100,
+    volumenCm3:     Math.round((Math.abs(totalVolume) / 1000) * 100) / 100,
+    oberflaecheMm2: Math.round(totalArea * 100) / 100,
+    oberflaecheCm2: Math.round((totalArea / 100) * 100) / 100,
+    features: { faces: meshes.length, edges: 0, vertices: 0, faceTypes },
+    bohrungen: zylinderGruppiert,
+    konen: [],
+    sphaeren: [],
+    analyseModus: 'mesh',
   };
+}
+
+// ─── Hauptfunktion ────────────────────────────────────────────────────────────
+
+export async function analyzeStepFile(file) {
+  const buffer = await file.arrayBuffer();
+  const uint8 = new Uint8Array(buffer);
+  console.log('analyzeStepFile:', file.name, uint8.length, 'bytes');
+
+  // WASM-Module parallel laden
+  const [oc, meshData] = await Promise.all([
+    initOC().catch(err => { console.warn('opencascade.js Ladefehler:', err); return null; }),
+    parseMeshData(uint8),
+  ]);
+
+  const mesh = meshData?.combinedMesh || { vertices: new Float32Array(0), indices: new Uint32Array(0) };
+
+  // B-Rep Analyse versuchen
+  if (oc) {
+    try {
+      const shape = await readStepShape(oc, uint8);
+      const bbox              = computeBBoxBrep(oc, shape);
+      const { volumen, oberflaeche } = computePropsBrep(oc, shape);
+      const { features, zylinder, konen, sphaeren } = detectFeaturesBrep(oc, shape);
+
+      console.log('B-Rep Analyse erfolgreich:', {
+        faceTypes: features.faceTypes,
+        zylinder: zylinder.length,
+      });
+
+      return {
+        abmessungen: {
+          laenge: Math.round(bbox.laenge * 100) / 100,
+          breite: Math.round(bbox.breite * 100) / 100,
+          hoehe:  Math.round(bbox.hoehe  * 100) / 100,
+        },
+        volumenMm3:      Math.round(volumen * 100) / 100,
+        volumenCm3:      Math.round((volumen / 1000) * 100) / 100,
+        oberflaecheMm2:  Math.round(oberflaeche * 100) / 100,
+        oberflaecheCm2:  Math.round((oberflaeche / 100) * 100) / 100,
+        features,
+        bohrungen: zylinder,
+        konen,
+        sphaeren,
+        mesh,
+        analyseModus: 'brep',
+      };
+    } catch (err) {
+      console.warn('B-Rep Analyse fehlgeschlagen, Fallback auf Mesh:', err.message);
+    }
+  }
+
+  // Fallback: Mesh-basierte Analyse
+  if (!meshData?.rawMeshes) {
+    throw new Error('STEP-Datei konnte weder mit B-Rep noch mit Mesh-Analyse gelesen werden.');
+  }
+
+  console.log('Verwende Mesh-Fallback Analyse...');
+  const fallback = analyzeMeshFallback(meshData.rawMeshes);
+  return { ...fallback, mesh };
 }

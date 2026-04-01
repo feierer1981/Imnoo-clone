@@ -138,46 +138,117 @@ function OcctTest() {
         addLog('  FEHLER: ' + e.message);
       }
 
-      // --- Methode 4: Reader_2 mit WorkSession ---
+      // --- Methode 4: STEPCAFControl_Reader ---
       addLog('');
-      addLog('--- Methode 4: STEPControl_Reader_2 + XSControl_WorkSession ---');
+      addLog('--- Methode 4: STEPCAFControl_Reader ---');
       try {
         try { oc.FS.unlink('test4.step'); } catch {}
         oc.FS.writeFile('test4.step', uint8);
 
-        const ws = new oc.XSControl_WorkSession();
-        const reader = new oc.STEPControl_Reader_2(ws, false);
-        const status = reader.ReadFile('test4.step');
-        addLog('  Status.value: ' + status.value);
+        // Verfuegbare Konstruktoren pruefen
+        const cafClasses = [];
+        for (const key of Object.getOwnPropertyNames(oc)) {
+          if (key.includes('STEPCAFControl_Reader')) cafClasses.push(key);
+        }
+        addLog('  CAF Reader Klassen: ' + cafClasses.join(', '));
 
-        if (status.value === 1) {
-          addLog('  ERFOLG!');
+        if (oc.STEPCAFControl_Reader_1) {
+          const cafReader = new oc.STEPCAFControl_Reader_1();
+          const status = cafReader.ReadFile('test4.step');
+          addLog('  Status.value: ' + status.value);
+          if (status.value === 1) {
+            addLog('  ERFOLG mit CAF Reader!');
+          }
         }
         oc.FS.unlink('test4.step');
       } catch (e) {
         addLog('  FEHLER: ' + e.message);
       }
 
-      // --- Methode 5: Nur mit .stp Extension ---
+      // --- Methode 5: ReadFile mit ProgressRange ---
       addLog('');
-      addLog('--- Methode 5: Binary + "model.stp" ---');
+      addLog('--- Methode 5: ReadFile + Message_ProgressRange ---');
       try {
-        try { oc.FS.unlink('model.stp'); } catch {}
-        oc.FS.writeFile('model.stp', uint8);
+        try { oc.FS.unlink('test5.step'); } catch {}
+        oc.FS.writeFile('test5.step', uint8);
 
         const reader = new oc.STEPControl_Reader_1();
-        const status = reader.ReadFile('model.stp');
-        addLog('  Status.value: ' + status.value);
-
-        if (status.value === 1) {
+        // Pruefen ob ReadFile eine Overload mit ProgressRange hat
+        addLog('  ReadFile.length: ' + reader.ReadFile.length);
+        const pr = new oc.Message_ProgressRange_1();
+        const status = reader.ReadFile('test5.step', pr);
+        addLog('  Status.value (mit ProgressRange): ' + status?.value);
+        if (status?.value === 1) {
           addLog('  ERFOLG!');
         }
-        oc.FS.unlink('model.stp');
+        oc.FS.unlink('test5.step');
       } catch (e) {
         addLog('  FEHLER: ' + e.message);
       }
 
-      // --- Methode 6: Datei-Inhalt pruefen ---
+      // --- Methode 6: NbRootsForTransfer vor TransferRoots ---
+      addLog('');
+      addLog('--- Methode 6: Detaillierte ReadFile-Analyse ---');
+      try {
+        try { oc.FS.unlink('test6.step'); } catch {}
+        oc.FS.writeFile('test6.step', uint8);
+
+        const reader = new oc.STEPControl_Reader_1();
+        const status = reader.ReadFile('test6.step');
+        addLog('  Status.value: ' + status.value);
+        addLog('  NbRootsForTransfer: ' + reader.NbRootsForTransfer());
+
+        // Auch bei Status 2, versuche TransferRoots
+        if (reader.NbRootsForTransfer() > 0) {
+          addLog('  Versuche TransferRoots trotz Status ' + status.value + '...');
+          try {
+            reader.TransferRoots();
+            const shape = reader.OneShape();
+            addLog('  Shape erhalten! ShapeType: ' + shape.ShapeType().value);
+            addLog('  IsNull: ' + shape.IsNull());
+          } catch (e2) {
+            addLog('  TransferRoots Fehler: ' + e2.message);
+          }
+        }
+        oc.FS.unlink('test6.step');
+      } catch (e) {
+        addLog('  FEHLER: ' + e.message);
+      }
+
+      // --- Methode 7: Datei kuerzen (nur Header testen) ---
+      addLog('');
+      addLog('--- Methode 7: Datei-Struktur analysieren ---');
+      try {
+        // ENDSEC und DATA Positionen finden
+        const headerEnd = text.indexOf('ENDSEC;');
+        const dataStart = text.indexOf('DATA;');
+        const dataEnd = text.lastIndexOf('ENDSEC;');
+        const endIso = text.indexOf('END-ISO-10303-21;');
+        addLog('  HEADER ENDSEC Position: ' + headerEnd);
+        addLog('  DATA Start Position: ' + dataStart);
+        addLog('  DATA ENDSEC Position: ' + dataEnd);
+        addLog('  END-ISO Position: ' + endIso);
+        addLog('  Datei endet mit: "' + text.slice(-30).replace(/\n/g, '\\n') + '"');
+
+        // Entity-Typen zaehlen
+        const entities = text.match(/#\d+\s*=\s*(\w+)/g);
+        addLog('  Anzahl Entities: ' + (entities ? entities.length : 0));
+
+        // Haeufigste Entity-Typen
+        if (entities) {
+          const typeCounts = {};
+          for (const e of entities) {
+            const type = e.match(/=\s*(\w+)/)[1];
+            typeCounts[type] = (typeCounts[type] || 0) + 1;
+          }
+          const sorted = Object.entries(typeCounts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+          addLog('  Top Entity-Typen: ' + sorted.map(([t, c]) => t + ':' + c).join(', '));
+        }
+      } catch (e) {
+        addLog('  FEHLER: ' + e.message);
+      }
+
+      // --- Datei-Analyse (wie vorher) ---
       addLog('');
       addLog('--- Datei-Analyse ---');
       addLog('  Dateigroesse: ' + uint8.length + ' bytes');
@@ -189,6 +260,10 @@ function OcctTest() {
       // AP-Version suchen
       const apMatch = text.match(/AP(\d{3})/);
       if (apMatch) addLog('  STEP AP-Version: AP' + apMatch[1]);
+
+      // Schema suchen
+      const schemaMatch = text.match(/FILE_SCHEMA\s*\(\s*\(\s*'([^']+)'/);
+      if (schemaMatch) addLog('  FILE_SCHEMA: ' + schemaMatch[1]);
 
       addLog('');
       addLog('=== Test abgeschlossen ===');

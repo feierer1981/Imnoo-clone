@@ -386,7 +386,9 @@ function Upload() {
               )}
 
               <p className="text-xs text-gray-400 mt-3">
-                Erkennung basiert auf B-Rep Flaechenanalyse mit OpenCascade.
+                {analysisResult.analyseModus === 'brep'
+                  ? 'Erkennung basiert auf B-Rep Flaechenanalyse mit OpenCascade.'
+                  : 'Erkennung basiert auf Mesh-Analyse (B-Rep war nicht verfuegbar).'}
               </p>
             </div>
           </div>
