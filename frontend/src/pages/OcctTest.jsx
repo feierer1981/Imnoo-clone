@@ -20,7 +20,8 @@ function OcctTest() {
       addLog('');
       addLog('OpenCascade WASM laden...');
 
-      const { initOpenCascade } = await import('opencascade.js');
+      const mod = await import('opencascade.js');
+      const initOpenCascade = mod.default || mod.initOpenCascade;
       const oc = await initOpenCascade();
       addLog('OpenCascade geladen. FS: ' + !!oc.FS);
 

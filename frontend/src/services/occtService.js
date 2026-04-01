@@ -9,7 +9,9 @@ let occtImportInstance = null;
 
 async function initOC() {
   if (ocInstance) return ocInstance;
-  const { initOpenCascade } = await import('opencascade.js');
+  const mod = await import('opencascade.js');
+  // v2 (beta): default export; v1: named export
+  const initOpenCascade = mod.default || mod.initOpenCascade;
   ocInstance = await initOpenCascade();
   return ocInstance;
 }
