@@ -31,47 +31,51 @@ async function readStepShape(oc, uint8) {
   console.log('readStepShape: Dateigröße', uint8.length, 'bytes');
 
   const filename = 'upload_brep.step';
-
-  // Methode 1: Als Text schreiben (STEP ist ein Textformat)
-  const textContent = new TextDecoder('utf-8').decode(uint8);
-  console.log('readStepShape: Erste 80 Zeichen:', textContent.substring(0, 80));
-
   try { oc.FS.unlink(filename); } catch {}
-  oc.FS.writeFile(filename, textContent);
+  oc.FS.writeFile(filename, uint8);
 
-  const stat = oc.FS.stat(filename);
-  console.log('readStepShape: FS geschrieben', stat.size, 'bytes');
+  // Verschiedene Reader-Methoden versuchen
+  const methods = [
+    { name: 'STEPControl_Reader_1', create: () => new oc.STEPControl_Reader_1() },
+  ];
 
-  const reader = new oc.STEPControl_Reader_1();
-  let status = reader.ReadFile(filename);
-  console.log('readStepShape: ReadFile Status (Text)', status?.value);
-
-  // Falls Text-Modus fehlschlaegt, Binary versuchen
-  if (status.value !== 1) {
-    console.log('readStepShape: Text fehlgeschlagen, versuche Binary...');
-    try { oc.FS.unlink(filename); } catch {}
-    oc.FS.writeFile(filename, uint8);
-
-    const reader2 = new oc.STEPControl_Reader_1();
-    status = reader2.ReadFile(filename);
-    console.log('readStepShape: ReadFile Status (Binary)', status?.value);
-
-    if (status.value !== 1) {
-      oc.FS.unlink(filename);
-      throw new Error(`STEP ReadFile fehlgeschlagen (Status ${status.value})`);
-    }
-
-    reader2.TransferRoots();
-    const shape = reader2.OneShape();
-    oc.FS.unlink(filename);
-    return shape;
+  // STEPCAFControl_Reader verfuegbar?
+  if (oc.STEPCAFControl_Reader_1) {
+    methods.push({
+      name: 'STEPCAFControl_Reader_1',
+      create: () => new oc.STEPCAFControl_Reader_1(),
+    });
   }
 
-  reader.TransferRoots();
-  const shape = reader.OneShape();
+  for (const method of methods) {
+    try {
+      const reader = method.create();
+      const status = reader.ReadFile(filename);
+      console.log(`readStepShape [${method.name}]: Status ${status?.value}`);
+
+      const nbRoots = reader.NbRootsForTransfer();
+      console.log(`readStepShape [${method.name}]: NbRoots ${nbRoots}`);
+
+      // Status 1 = Erfolg, Status 2 = Fehler aber evtl. noch Roots vorhanden
+      if (nbRoots > 0) {
+        console.log(`readStepShape [${method.name}]: TransferRoots (${nbRoots} roots)...`);
+        reader.TransferRoots();
+        const shape = reader.OneShape();
+
+        if (!shape.IsNull()) {
+          console.log(`readStepShape [${method.name}]: Shape OK, Type ${shape.ShapeType().value}`);
+          oc.FS.unlink(filename);
+          return shape;
+        }
+        console.log(`readStepShape [${method.name}]: Shape ist null`);
+      }
+    } catch (e) {
+      console.warn(`readStepShape [${method.name}]: Fehler:`, e.message);
+    }
+  }
 
   oc.FS.unlink(filename);
-  return shape;
+  throw new Error('STEP ReadFile: Kein Reader konnte die Datei lesen');
 }
 
 // ─── B-Rep Feature-Erkennung ──────────────────────────────────────────────────
