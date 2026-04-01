@@ -271,6 +271,12 @@ function Upload() {
                       <span className="text-lg font-bold text-purple-800">{analysisResult.features.faceTypes.sphaerisch}</span>
                     </div>
                   )}
+                  {analysisResult.features.faceTypes.toroidal > 0 && (
+                    <div className="flex items-center justify-between p-3 bg-teal-50 rounded-lg">
+                      <span className="text-sm text-teal-700">Toroidale</span>
+                      <span className="text-lg font-bold text-teal-800">{analysisResult.features.faceTypes.toroidal}</span>
+                    </div>
+                  )}
                   {analysisResult.features.faceTypes.freiform > 0 && (
                     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                       <span className="text-sm text-gray-600">Freiform</span>
@@ -285,8 +291,8 @@ function Upload() {
                   <p className="text-xs text-gray-500">Flaechen</p>
                 </div>
                 <div className="text-center p-2">
-                  <p className="text-2xl font-bold text-gray-800">{analysisResult.features.triangles}</p>
-                  <p className="text-xs text-gray-500">Dreiecke</p>
+                  <p className="text-2xl font-bold text-gray-800">{analysisResult.features.edges}</p>
+                  <p className="text-xs text-gray-500">Kanten</p>
                 </div>
                 <div className="text-center p-2">
                   <p className="text-2xl font-bold text-gray-800">{analysisResult.features.vertices}</p>
@@ -340,7 +346,7 @@ function Upload() {
                       >
                         <span className="text-orange-800">Konus #{i + 1}</span>
                         <span className="text-orange-700">
-                          &oslash; {k.radiusUnten * 2} &rarr; {k.radiusOben * 2} mm
+                          R: {k.radiusRef} mm, Winkel: {k.halbwinkel}&deg;
                         </span>
                       </div>
                     ))}
@@ -380,7 +386,7 @@ function Upload() {
               )}
 
               <p className="text-xs text-gray-400 mt-3">
-                Erkennung basiert auf Normalen- und Kruemmungsanalyse der Mesh-Daten.
+                Erkennung basiert auf B-Rep Flaechenanalyse mit OpenCascade.
               </p>
             </div>
           </div>
