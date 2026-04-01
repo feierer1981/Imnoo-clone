@@ -61,7 +61,26 @@ async function readStepShape(oc, uint8) {
       // Status 1 = Erfolg, Status 2 = Fehler aber evtl. noch Roots vorhanden
       if (nbRoots > 0) {
         console.log(`readStepShape [${method.name}]: TransferRoots (${nbRoots} roots)...`);
-        reader.TransferRoots();
+        // TransferRoots: v2 braucht Message_ProgressRange, v1 ohne Argument
+        let transferred = false;
+        // Versuch 1: Message_ProgressRange_1 (v2 API)
+        if (!transferred && oc.Message_ProgressRange_1) {
+          try {
+            reader.TransferRoots(new oc.Message_ProgressRange_1());
+            transferred = true;
+          } catch (e) { console.log('TransferRoots(ProgressRange_1) fehlgeschlagen:', e.message); }
+        }
+        // Versuch 2: Message_ProgressRange (v2 alternativ)
+        if (!transferred && oc.Message_ProgressRange) {
+          try {
+            reader.TransferRoots(new oc.Message_ProgressRange());
+            transferred = true;
+          } catch (e) { console.log('TransferRoots(ProgressRange) fehlgeschlagen:', e.message); }
+        }
+        // Versuch 3: Ohne Argument (v1 API)
+        if (!transferred) {
+          reader.TransferRoots();
+        }
         const shape = reader.OneShape();
 
         if (!shape.IsNull()) {
