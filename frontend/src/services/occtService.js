@@ -31,20 +31,40 @@ async function readStepShape(oc, uint8) {
   console.log('readStepShape: Dateigröße', uint8.length, 'bytes');
 
   const filename = 'upload_brep.step';
-  try { oc.FS.unlink(filename); } catch {}
-  oc.FS.writeFile(filename, uint8);
 
-  // Verify file was written
-  const written = oc.FS.readFile(filename);
-  console.log('readStepShape: FS geschrieben', written.length, 'bytes');
+  // Methode 1: Als Text schreiben (STEP ist ein Textformat)
+  const textContent = new TextDecoder('utf-8').decode(uint8);
+  console.log('readStepShape: Erste 80 Zeichen:', textContent.substring(0, 80));
+
+  try { oc.FS.unlink(filename); } catch {}
+  oc.FS.writeFile(filename, textContent);
+
+  const stat = oc.FS.stat(filename);
+  console.log('readStepShape: FS geschrieben', stat.size, 'bytes');
 
   const reader = new oc.STEPControl_Reader_1();
-  const status = reader.ReadFile(filename);
-  console.log('readStepShape: ReadFile Status', status, status?.value);
+  let status = reader.ReadFile(filename);
+  console.log('readStepShape: ReadFile Status (Text)', status?.value);
 
+  // Falls Text-Modus fehlschlaegt, Binary versuchen
   if (status.value !== 1) {
+    console.log('readStepShape: Text fehlgeschlagen, versuche Binary...');
+    try { oc.FS.unlink(filename); } catch {}
+    oc.FS.writeFile(filename, uint8);
+
+    const reader2 = new oc.STEPControl_Reader_1();
+    status = reader2.ReadFile(filename);
+    console.log('readStepShape: ReadFile Status (Binary)', status?.value);
+
+    if (status.value !== 1) {
+      oc.FS.unlink(filename);
+      throw new Error(`STEP ReadFile fehlgeschlagen (Status ${status.value})`);
+    }
+
+    reader2.TransferRoots();
+    const shape = reader2.OneShape();
     oc.FS.unlink(filename);
-    throw new Error(`STEP ReadFile fehlgeschlagen (Status ${status.value})`);
+    return shape;
   }
 
   reader.TransferRoots();
