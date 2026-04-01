@@ -27,23 +27,26 @@ async function initOcctImport() {
 
 // ─── STEP-Datei mit opencascade.js einlesen ───────────────────────────────────
 
-async function readStepShape(oc, file) {
-  const buffer = await file.arrayBuffer();
-  const uint8 = new Uint8Array(buffer);
+async function readStepShape(oc, uint8) {
+  console.log('readStepShape: Dateigröße', uint8.length, 'bytes');
 
   const filename = 'upload_brep.step';
   try { oc.FS.unlink(filename); } catch {}
   oc.FS.writeFile(filename, uint8);
 
+  // Verify file was written
+  const written = oc.FS.readFile(filename);
+  console.log('readStepShape: FS geschrieben', written.length, 'bytes');
+
   const reader = new oc.STEPControl_Reader_1();
   const status = reader.ReadFile(filename);
+  console.log('readStepShape: ReadFile Status', status, status?.value);
 
   if (status.value !== 1) {
     oc.FS.unlink(filename);
     throw new Error(`STEP ReadFile fehlgeschlagen (Status ${status.value})`);
   }
 
-  // TransferRoots ohne Message_ProgressRange (existiert nicht in dieser Version)
   reader.TransferRoots();
   const shape = reader.OneShape();
 
@@ -229,10 +232,9 @@ function computePropsBrep(oc, shape) {
 
 // ─── Mesh fuer 3D-Vorschau (occt-import-js) ──────────────────────────────────
 
-async function getMesh(file) {
+async function getMesh(uint8) {
   const occtImport = await initOcctImport();
-  const buffer = await file.arrayBuffer();
-  const result = occtImport.ReadStepFile(new Uint8Array(buffer), null);
+  const result = occtImport.ReadStepFile(uint8, null);
 
   if (!result.success || !result.meshes?.length) return null;
 
@@ -257,14 +259,19 @@ async function getMesh(file) {
 // ─── Hauptfunktion ────────────────────────────────────────────────────────────
 
 export async function analyzeStepFile(file) {
-  // Beide WASM-Module parallel laden
+  // Datei einmal lesen
+  const buffer = await file.arrayBuffer();
+  const uint8 = new Uint8Array(buffer);
+  console.log('analyzeStepFile:', file.name, uint8.length, 'bytes');
+
+  // Beide WASM-Module parallel laden + Mesh parallel generieren
   const [oc, mesh] = await Promise.all([
     initOC(),
-    getMesh(file),
+    getMesh(uint8),
   ]);
 
   // B-Rep Shape einlesen
-  const shape = await readStepShape(oc, file);
+  const shape = await readStepShape(oc, uint8);
 
   // B-Rep Analysen
   const bbox              = computeBBoxBrep(oc, shape);
