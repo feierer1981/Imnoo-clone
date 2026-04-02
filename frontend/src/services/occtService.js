@@ -111,7 +111,8 @@ function detectFeaturesBrep(oc, shape) {
     freiform: 0,
   };
 
-  const zylinder = [];
+  const bohrungen = [];  // 360° Zylinder (Bohrungen, Zapfen)
+  const radien    = [];  // < 360° Zylinder (Verrundungen, Radien)
   const konen   = [];
   const sphaeren = [];
   let faceCount = 0;
@@ -134,13 +135,7 @@ function detectFeaturesBrep(oc, shape) {
       const adaptor = new oc.GeomAdaptor_Surface_2(surface);
       const surfType = adaptor.GetType();
 
-      // surfType ist ein Enum: GeomAbs_SurfaceType
       const typeVal = surfType.value !== undefined ? surfType.value : surfType;
-
-      // GeomAbs_SurfaceType Enum-Werte:
-      // 0=Plane, 1=Cylinder, 2=Cone, 3=Sphere, 4=Torus,
-      // 5=BezierSurface, 6=BSplineSurface, 7=SurfaceOfRevolution,
-      // 8=SurfaceOfExtrusion, 9=OffsetSurface, 10=OtherSurface
 
       if (typeVal === 0) {
         faceTypes.planar++;
@@ -150,6 +145,15 @@ function detectFeaturesBrep(oc, shape) {
         try {
           const cyl = adaptor.Cylinder();
           const radius = cyl.Radius();
+
+          // Winkelbereich ueber BRepAdaptor_Surface (U = Winkel bei Zylinder)
+          let winkelGrad = 360;
+          try {
+            const brepAdaptor = new oc.BRepAdaptor_Surface_2(face, true);
+            const uMin = brepAdaptor.FirstUParameter();
+            const uMax = brepAdaptor.LastUParameter();
+            winkelGrad = Math.round(((uMax - uMin) * 180 / Math.PI) * 10) / 10;
+          } catch { /* Fallback: als 360° annehmen */ }
 
           // Hoehe aus Bounding Box der Flaeche
           const faceBbox = new oc.Bnd_Box_1();
@@ -161,11 +165,19 @@ function detectFeaturesBrep(oc, shape) {
           const dz = Math.abs(fMax.Z() - fMin.Z());
           const hoehe = Math.max(dx, dy, dz);
 
-          zylinder.push({
+          const info = {
             radius: Math.round(radius * 100) / 100,
             durchmesser: Math.round(radius * 2 * 100) / 100,
             hoehe: Math.round(hoehe * 100) / 100,
-          });
+            winkelGrad,
+          };
+
+          // >= 350° als volle Bohrung/Zylinder werten (kleine Toleranz)
+          if (winkelGrad >= 350) {
+            bohrungen.push(info);
+          } else {
+            radien.push(info);
+          }
         } catch { /* Radius nicht auslesbar */ }
 
       } else if (typeVal === 2) {
@@ -218,23 +230,38 @@ function detectFeaturesBrep(oc, shape) {
   );
   while (vertexExplorer.More()) { vertexCount++; vertexExplorer.Next(); }
 
-  // Zylinder zusammenfassen: gleicher Durchmesser (Toleranz 0.3mm) -> gruppieren
-  const zylinderGruppiert = [];
-  for (const z of zylinder.sort((a, b) => a.durchmesser - b.durchmesser)) {
-    const existing = zylinderGruppiert.find(
-      g => Math.abs(g.durchmesser - z.durchmesser) < 0.3
+  // Bohrungen zusammenfassen: gleicher Durchmesser (Toleranz 0.3mm)
+  const bohrungenGruppiert = [];
+  for (const b of bohrungen.sort((a, c) => a.durchmesser - c.durchmesser)) {
+    const existing = bohrungenGruppiert.find(
+      g => Math.abs(g.durchmesser - b.durchmesser) < 0.3
     );
     if (existing) {
       existing.anzahl++;
-      existing.hoehe = Math.max(existing.hoehe, z.hoehe);
+      existing.hoehe = Math.max(existing.hoehe, b.hoehe);
     } else {
-      zylinderGruppiert.push({ ...z, anzahl: 1 });
+      bohrungenGruppiert.push({ ...b, anzahl: 1 });
+    }
+  }
+
+  // Radien zusammenfassen: gleicher Durchmesser (Toleranz 0.3mm)
+  const radienGruppiert = [];
+  for (const r of radien.sort((a, c) => a.durchmesser - c.durchmesser)) {
+    const existing = radienGruppiert.find(
+      g => Math.abs(g.durchmesser - r.durchmesser) < 0.3 && Math.abs(g.winkelGrad - r.winkelGrad) < 10
+    );
+    if (existing) {
+      existing.anzahl++;
+      existing.hoehe = Math.max(existing.hoehe, r.hoehe);
+    } else {
+      radienGruppiert.push({ ...r, anzahl: 1 });
     }
   }
 
   return {
     features: { faces: faceCount, edges: edgeCount, vertices: vertexCount, faceTypes },
-    zylinder: zylinderGruppiert,
+    bohrungen: bohrungenGruppiert,
+    radien: radienGruppiert,
     konen,
     sphaeren,
   };
@@ -482,11 +509,12 @@ export async function analyzeStepFile(file) {
       const shape = await readStepShape(oc, uint8);
       const bbox              = computeBBoxBrep(oc, shape);
       const { volumen, oberflaeche } = computePropsBrep(oc, shape);
-      const { features, zylinder, konen, sphaeren } = detectFeaturesBrep(oc, shape);
+      const result = detectFeaturesBrep(oc, shape);
 
       console.log('B-Rep Analyse erfolgreich:', {
-        faceTypes: features.faceTypes,
-        zylinder: zylinder.length,
+        faceTypes: result.features.faceTypes,
+        bohrungen: result.bohrungen.length,
+        radien: result.radien.length,
       });
 
       return {
@@ -499,10 +527,11 @@ export async function analyzeStepFile(file) {
         volumenCm3:      Math.round((volumen / 1000) * 100) / 100,
         oberflaecheMm2:  Math.round(oberflaeche * 100) / 100,
         oberflaecheCm2:  Math.round((oberflaeche / 100) * 100) / 100,
-        features,
-        bohrungen: zylinder,
-        konen,
-        sphaeren,
+        features: result.features,
+        bohrungen: result.bohrungen,
+        radien: result.radien,
+        konen: result.konen,
+        sphaeren: result.sphaeren,
         mesh,
         analyseModus: 'brep',
       };

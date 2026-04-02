@@ -91,6 +91,7 @@ function Upload() {
         volumenCm3: analysisResult.volumenCm3,
         features: analysisResult.features,
         bohrungen: analysisResult.bohrungen,
+        radien: analysisResult.radien,
       },
     });
   };
@@ -307,11 +308,11 @@ function Upload() {
                 Erkannte Geometrie-Features
               </h2>
 
-              {/* Zylinder / Bohrungen */}
-              {analysisResult.bohrungen.length > 0 && (
+              {/* Bohrungen (360° Zylinder) */}
+              {analysisResult.bohrungen?.length > 0 && (
                 <div className="mb-4">
                   <h3 className="text-sm font-medium text-gray-600 mb-2">
-                    Zylindrische Flaechen ({analysisResult.bohrungen.length})
+                    Bohrungen / Zylinder ({analysisResult.bohrungen.reduce((s, b) => s + (b.anzahl || 1), 0)})
                   </h3>
                   <div className="space-y-1.5">
                     {analysisResult.bohrungen.map((b, i) => (
@@ -324,7 +325,32 @@ function Upload() {
                           {b.anzahl > 1 && <span className="text-amber-600 ml-1">(&times;{b.anzahl})</span>}
                         </span>
                         <span className="text-amber-700">
-                          H: {b.hoehe} mm
+                          T: {b.hoehe} mm
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Radien (< 360° Zylinder) */}
+              {analysisResult.radien?.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-medium text-gray-600 mb-2">
+                    Radien / Verrundungen ({analysisResult.radien.reduce((s, r) => s + (r.anzahl || 1), 0)})
+                  </h3>
+                  <div className="space-y-1.5">
+                    {analysisResult.radien.map((r, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center justify-between py-2 px-3 bg-sky-50 rounded-lg text-sm"
+                      >
+                        <span className="text-sky-800">
+                          R{r.radius} mm
+                          {r.anzahl > 1 && <span className="text-sky-600 ml-1">(&times;{r.anzahl})</span>}
+                        </span>
+                        <span className="text-sky-700">
+                          {r.winkelGrad}&deg;
                         </span>
                       </div>
                     ))}
@@ -377,7 +403,8 @@ function Upload() {
               )}
 
               {/* Keine Features */}
-              {analysisResult.bohrungen.length === 0 &&
+              {(!analysisResult.bohrungen || analysisResult.bohrungen.length === 0) &&
+               (!analysisResult.radien || analysisResult.radien.length === 0) &&
                (!analysisResult.konen || analysisResult.konen.length === 0) &&
                (!analysisResult.sphaeren || analysisResult.sphaeren.length === 0) && (
                 <p className="text-gray-500 text-sm">
