@@ -101,7 +101,7 @@ async function readStepShape(oc, uint8) {
 
 // ─── B-Rep Feature-Erkennung ──────────────────────────────────────────────────
 
-function detectFeaturesBrep(oc, shape) {
+function detectFeaturesBrep(oc, shape, bbox) {
   const faceTypes = {
     planar: 0,
     zylindrisch: 0,
@@ -111,13 +111,18 @@ function detectFeaturesBrep(oc, shape) {
     freiform: 0,
   };
 
-  const bohrungen = [];  // 360° Zylinder (Bohrungen, Zapfen)
-  const radien    = [];  // < 360° Zylinder (Verrundungen, Radien)
-  const konen   = [];
-  const sphaeren = [];
+  // Rohdaten pro Flaeche sammeln (fuer spaetere Analyse)
+  const allFaces = [];       // { face, typeVal, adaptor, ... }
+  const rawBohrungen = [];   // 360° Zylinder
+  const rawRadien    = [];   // < 360° Zylinder
+  const rawKonen     = [];
+  const rawSphaeren  = [];
   let faceCount = 0;
   let edgeCount = 0;
   let vertexCount = 0;
+
+  // Bauteil-Hoehe fuer Durchgangsbohrung-Erkennung
+  const bboxHoehe = Math.max(bbox.laenge, bbox.breite, bbox.hoehe);
 
   const faceExplorer = new oc.TopExp_Explorer_2(
     shape,
@@ -129,13 +134,12 @@ function detectFeaturesBrep(oc, shape) {
     faceCount++;
     try {
       const face = oc.TopoDS.Face_1(faceExplorer.Current());
-
       const surface = oc.BRep_Tool.Surface_2(face);
-
       const adaptor = new oc.GeomAdaptor_Surface_2(surface);
       const surfType = adaptor.GetType();
-
       const typeVal = surfType.value !== undefined ? surfType.value : surfType;
+
+      allFaces.push({ face, typeVal, adaptor });
 
       if (typeVal === 0) {
         faceTypes.planar++;
@@ -145,15 +149,19 @@ function detectFeaturesBrep(oc, shape) {
         try {
           const cyl = adaptor.Cylinder();
           const radius = cyl.Radius();
+          const axis = cyl.Axis();
+          const axisDir = axis.Direction();
+          const axisLoc = axis.Location();
 
-          // Winkelbereich ueber BRepAdaptor_Surface (U = Winkel bei Zylinder)
+          // Winkelbereich (U = Winkel bei Zylinder)
           let winkelGrad = 360;
+          let uMin = 0, uMax = 2 * Math.PI;
           try {
             const brepAdaptor = new oc.BRepAdaptor_Surface_2(face, true);
-            const uMin = brepAdaptor.FirstUParameter();
-            const uMax = brepAdaptor.LastUParameter();
+            uMin = brepAdaptor.FirstUParameter();
+            uMax = brepAdaptor.LastUParameter();
             winkelGrad = Math.round(((uMax - uMin) * 180 / Math.PI) * 10) / 10;
-          } catch { /* Fallback: als 360° annehmen */ }
+          } catch {}
 
           // Hoehe aus Bounding Box der Flaeche
           const faceBbox = new oc.Bnd_Box_1();
@@ -165,88 +173,206 @@ function detectFeaturesBrep(oc, shape) {
           const dz = Math.abs(fMax.Z() - fMin.Z());
           const hoehe = Math.max(dx, dy, dz);
 
+          // Konkav/Konvex: Face-Orientation pruefen
+          // FORWARD = Normale zeigt nach aussen (konvex/Welle)
+          // REVERSED = Normale zeigt nach innen (konkav/Bohrung)
+          let konkav = false;
+          try {
+            const orient = face.Orientation_1();
+            const orientVal = orient.value !== undefined ? orient.value : orient;
+            // TopAbs_FORWARD=0, TopAbs_REVERSED=1
+            konkav = (orientVal === 1);
+          } catch {}
+
           const info = {
             radius: Math.round(radius * 100) / 100,
             durchmesser: Math.round(radius * 2 * 100) / 100,
             hoehe: Math.round(hoehe * 100) / 100,
             winkelGrad,
+            konkav,
+            typ: konkav ? 'Bohrung' : 'Welle',
+            axisDir: [axisDir.X(), axisDir.Y(), axisDir.Z()],
+            axisLoc: [axisLoc.X(), axisLoc.Y(), axisLoc.Z()],
+            face,
           };
 
-          // >= 350° als volle Bohrung/Zylinder werten (kleine Toleranz)
           if (winkelGrad >= 350) {
-            bohrungen.push(info);
+            rawBohrungen.push(info);
           } else {
-            radien.push(info);
+            rawRadien.push(info);
           }
-        } catch { /* Radius nicht auslesbar */ }
+        } catch {}
 
       } else if (typeVal === 2) {
+        // Konus
         faceTypes.konisch++;
         try {
           const cone = adaptor.Cone();
           const r1 = cone.RefRadius();
           const angle = cone.HalfAngle();
-          konen.push({
+
+          let winkelGrad = 360;
+          try {
+            const brepAdaptor = new oc.BRepAdaptor_Surface_2(face, true);
+            winkelGrad = Math.round(((brepAdaptor.LastUParameter() - brepAdaptor.FirstUParameter()) * 180 / Math.PI) * 10) / 10;
+          } catch {}
+
+          // Hoehe
+          const faceBbox = new oc.Bnd_Box_1();
+          oc.BRepBndLib.Add(face, faceBbox, false);
+          const fMin = faceBbox.CornerMin();
+          const fMax = faceBbox.CornerMax();
+          const konHoehe = Math.max(
+            Math.abs(fMax.X()-fMin.X()),
+            Math.abs(fMax.Y()-fMin.Y()),
+            Math.abs(fMax.Z()-fMin.Z())
+          );
+
+          const halbwinkelGrad = Math.round((Math.abs(angle) * 180 / Math.PI) * 10) / 10;
+
+          rawKonen.push({
             radiusRef: Math.round(r1 * 100) / 100,
-            halbwinkel: Math.round((angle * 180 / Math.PI) * 10) / 10,
+            halbwinkel: halbwinkelGrad,
+            hoehe: Math.round(konHoehe * 100) / 100,
+            winkelGrad,
+            istFase: halbwinkelGrad >= 40 && halbwinkelGrad <= 50 && winkelGrad >= 350,
+            istSenkung: winkelGrad >= 350,
+            face,
           });
-        } catch { /* Nicht auslesbar */ }
+        } catch {}
 
       } else if (typeVal === 3) {
         faceTypes.sphaerisch++;
         try {
           const sph = adaptor.Sphere();
           const r = sph.Radius();
-          sphaeren.push({
+          rawSphaeren.push({
             radius: Math.round(r * 100) / 100,
             durchmesser: Math.round(r * 2 * 100) / 100,
           });
-        } catch { /* Nicht auslesbar */ }
+        } catch {}
 
       } else if (typeVal === 4) {
         faceTypes.toroidal++;
-
       } else {
         faceTypes.freiform++;
       }
 
-    } catch { /* Flaeche uebersprungen */ }
+    } catch {}
     faceExplorer.Next();
   }
 
-  // Kanten zaehlen
+  // Kanten zaehlen + Kantentypen analysieren (fuer Gewinde)
+  let helixKanten = 0;
   const edgeExplorer = new oc.TopExp_Explorer_2(
-    shape,
-    oc.TopAbs_ShapeEnum.TopAbs_EDGE,
-    oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+    shape, oc.TopAbs_ShapeEnum.TopAbs_EDGE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE
   );
-  while (edgeExplorer.More()) { edgeCount++; edgeExplorer.Next(); }
+  while (edgeExplorer.More()) {
+    edgeCount++;
+    try {
+      const edge = oc.TopoDS.Edge_1(edgeExplorer.Current());
+      const curveAdaptor = new oc.BRepAdaptor_Curve_2(edge);
+      const curveType = curveAdaptor.GetType();
+      const ctVal = curveType.value !== undefined ? curveType.value : curveType;
+      // GeomAbs_CurveType: 0=Line, 1=Circle, 2=Ellipse, 3=Hyperbola,
+      // 4=Parabola, 5=BezierCurve, 6=BSplineCurve, 7=OffsetCurve, 8=OtherCurve
+      // BSpline an Zylindern koennen Gewinde sein
+      if (ctVal === 6 || ctVal === 8) helixKanten++;
+    } catch {}
+    edgeExplorer.Next();
+  }
 
   // Vertices zaehlen
   const vertexExplorer = new oc.TopExp_Explorer_2(
-    shape,
-    oc.TopAbs_ShapeEnum.TopAbs_VERTEX,
-    oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+    shape, oc.TopAbs_ShapeEnum.TopAbs_VERTEX, oc.TopAbs_ShapeEnum.TopAbs_SHAPE
   );
   while (vertexExplorer.More()) { vertexCount++; vertexExplorer.Next(); }
 
-  // Bohrungen zusammenfassen: gleicher Durchmesser (Toleranz 0.3mm)
+  // ─── Durchgangs- vs. Sacklochbohrung ───────────────────────────────────────
+  for (const b of rawBohrungen) {
+    // Wenn Bohrungshoehe >= 90% der Bauteilhoehe -> Durchgangsbohrung
+    b.durchgang = b.hoehe >= bboxHoehe * 0.9;
+  }
+
+  // ─── Senkungen erkennen: Konus direkt ueber/unter einer Bohrung ───────────
+  for (const k of rawKonen) {
+    if (!k.istSenkung) continue;
+    // Pruefen ob ein Zylinder mit aehnlicher Achsenposition existiert
+    for (const b of rawBohrungen) {
+      if (b.durchmesser <= k.radiusRef * 2 + 1 && b.durchmesser >= k.radiusRef * 2 - 5) {
+        k.zuBohrung = b.durchmesser;
+        b.hatSenkung = true;
+        break;
+      }
+    }
+  }
+
+  // ─── Gewinde-Heuristik ────────────────────────────────────────────────────
+  // Standard-Gewinde-Durchmesser (ISO Metrisch) in mm
+  const gewindeDurchmesser = [
+    { name: 'M2',   kern: 1.567, nenn: 2 },
+    { name: 'M2.5', kern: 1.951, nenn: 2.5 },
+    { name: 'M3',   kern: 2.387, nenn: 3 },
+    { name: 'M4',   kern: 3.141, nenn: 4 },
+    { name: 'M5',   kern: 4.019, nenn: 5 },
+    { name: 'M6',   kern: 4.773, nenn: 6 },
+    { name: 'M8',   kern: 6.466, nenn: 8 },
+    { name: 'M10',  kern: 8.160, nenn: 10 },
+    { name: 'M12',  kern: 9.853, nenn: 12 },
+    { name: 'M14',  kern: 11.546, nenn: 14 },
+    { name: 'M16',  kern: 13.546, nenn: 16 },
+    { name: 'M20',  kern: 16.933, nenn: 20 },
+    { name: 'M24',  kern: 20.319, nenn: 24 },
+  ];
+
+  for (const b of rawBohrungen) {
+    if (!b.konkav) continue; // Nur Bohrungen (nicht Wellen)
+    // Pruefen ob Durchmesser einem Kernloch-Durchmesser entspricht
+    const match = gewindeDurchmesser.find(
+      g => Math.abs(b.durchmesser - g.kern) < 0.3
+    );
+    if (match) {
+      b.gewinde = match.name;
+    }
+  }
+
+  // ─── Fasen erkennen: Konen mit ~45° Halbwinkel ────────────────────────────
+  const fasen = rawKonen.filter(k => k.istFase);
+
+  // ─── Kleinster Innenradius (Mindest-Werkzeugradius) ────────────────────────
+  let minInnenradius = Infinity;
+  for (const b of rawBohrungen) {
+    if (b.konkav && b.radius < minInnenradius) minInnenradius = b.radius;
+  }
+  for (const r of rawRadien) {
+    if (r.radius < minInnenradius) minInnenradius = r.radius;
+  }
+  if (minInnenradius === Infinity) minInnenradius = 0;
+
+  // ─── Bohrungen gruppieren ─────────────────────────────────────────────────
   const bohrungenGruppiert = [];
-  for (const b of bohrungen.sort((a, c) => a.durchmesser - c.durchmesser)) {
+  for (const b of rawBohrungen.sort((a, c) => a.durchmesser - c.durchmesser)) {
     const existing = bohrungenGruppiert.find(
-      g => Math.abs(g.durchmesser - b.durchmesser) < 0.3
+      g => Math.abs(g.durchmesser - b.durchmesser) < 0.3 && g.konkav === b.konkav
     );
     if (existing) {
       existing.anzahl++;
       existing.hoehe = Math.max(existing.hoehe, b.hoehe);
     } else {
-      bohrungenGruppiert.push({ ...b, anzahl: 1 });
+      const entry = {
+        radius: b.radius, durchmesser: b.durchmesser, hoehe: b.hoehe,
+        winkelGrad: b.winkelGrad, konkav: b.konkav, typ: b.typ,
+        durchgang: b.durchgang, anzahl: 1,
+      };
+      if (b.gewinde) entry.gewinde = b.gewinde;
+      if (b.hatSenkung) entry.hatSenkung = true;
+      bohrungenGruppiert.push(entry);
     }
   }
 
-  // Radien zusammenfassen: gleicher Durchmesser (Toleranz 0.3mm)
+  // Radien gruppieren
   const radienGruppiert = [];
-  for (const r of radien.sort((a, c) => a.durchmesser - c.durchmesser)) {
+  for (const r of rawRadien.sort((a, c) => a.durchmesser - c.durchmesser)) {
     const existing = radienGruppiert.find(
       g => Math.abs(g.durchmesser - r.durchmesser) < 0.3 && Math.abs(g.winkelGrad - r.winkelGrad) < 10
     );
@@ -254,7 +380,49 @@ function detectFeaturesBrep(oc, shape) {
       existing.anzahl++;
       existing.hoehe = Math.max(existing.hoehe, r.hoehe);
     } else {
-      radienGruppiert.push({ ...r, anzahl: 1 });
+      radienGruppiert.push({
+        radius: r.radius, durchmesser: r.durchmesser, hoehe: r.hoehe,
+        winkelGrad: r.winkelGrad, anzahl: 1,
+      });
+    }
+  }
+
+  // Fasen gruppieren
+  const fasenGruppiert = [];
+  for (const f of fasen) {
+    const existing = fasenGruppiert.find(
+      g => Math.abs(g.hoehe - f.hoehe) < 0.3 && Math.abs(g.halbwinkel - f.halbwinkel) < 3
+    );
+    if (existing) {
+      existing.anzahl++;
+    } else {
+      fasenGruppiert.push({
+        hoehe: f.hoehe,
+        halbwinkel: f.halbwinkel,
+        zuBohrung: f.zuBohrung || null,
+        anzahl: 1,
+      });
+    }
+  }
+
+  // Senkungen (volle Konen die keine Fasen sind)
+  const senkungen = rawKonen.filter(k => k.istSenkung && !k.istFase && k.zuBohrung);
+  const senkungenGruppiert = [];
+  for (const s of senkungen) {
+    const existing = senkungenGruppiert.find(
+      g => Math.abs(g.radiusRef - s.radiusRef) < 0.3
+    );
+    if (existing) {
+      existing.anzahl++;
+    } else {
+      senkungenGruppiert.push({
+        radiusRef: s.radiusRef,
+        durchmesser: Math.round(s.radiusRef * 2 * 100) / 100,
+        halbwinkel: s.halbwinkel,
+        hoehe: s.hoehe,
+        zuBohrung: s.zuBohrung,
+        anzahl: 1,
+      });
     }
   }
 
@@ -262,9 +430,74 @@ function detectFeaturesBrep(oc, shape) {
     features: { faces: faceCount, edges: edgeCount, vertices: vertexCount, faceTypes },
     bohrungen: bohrungenGruppiert,
     radien: radienGruppiert,
-    konen,
-    sphaeren,
+    fasen: fasenGruppiert,
+    senkungen: senkungenGruppiert,
+    konen: rawKonen.filter(k => !k.istFase && !k.zuBohrung).map(k => ({
+      radiusRef: k.radiusRef, halbwinkel: k.halbwinkel, hoehe: k.hoehe,
+    })),
+    sphaeren: rawSphaeren,
+    minInnenradius: Math.round(minInnenradius * 100) / 100,
+    hatGewinde: rawBohrungen.some(b => b.gewinde),
+    gewindeBohrungen: rawBohrungen.filter(b => b.gewinde).map(b => ({
+      gewinde: b.gewinde, durchmesser: b.durchmesser, hoehe: b.hoehe,
+    })),
   };
+}
+
+// ─── STEP-Metadaten aus Datei-Header auslesen ────────────────────────────────
+
+function parseStepMetadata(uint8) {
+  const text = new TextDecoder('utf-8').decode(uint8);
+  const meta = {};
+
+  // Bauteil-Name aus FILE_NAME
+  const nameMatch = text.match(/FILE_NAME\s*\(\s*'([^']*)'/);
+  if (nameMatch) meta.dateiname = nameMatch[1];
+
+  // AP-Version
+  const apMatch = text.match(/FILE_DESCRIPTION\s*\(\s*\(\s*'([^']*)'/);
+  if (apMatch) meta.beschreibung = apMatch[1];
+
+  // Schema
+  const schemaMatch = text.match(/FILE_SCHEMA\s*\(\s*\(\s*'([^']*)'/);
+  if (schemaMatch) meta.schema = schemaMatch[1];
+
+  // Erstelldatum
+  const dateMatch = text.match(/FILE_NAME\s*\([^,]*,\s*'([^']*)'/);
+  if (dateMatch) meta.erstelldatum = dateMatch[1];
+
+  // CAD-System
+  const cadMatch = text.match(/FILE_NAME\s*\([^,]*,[^,]*,[^,]*,[^,]*,\s*'([^']*)'/);
+  if (cadMatch) meta.cadSystem = cadMatch[1];
+
+  return meta;
+}
+
+// ─── Gewicht nach Material berechnen ─────────────────────────────────────────
+
+function berechneGewicht(volumenMm3) {
+  // Dichte in g/mm³
+  const materialien = {
+    'Stahl':     { dichte: 0.00785, name: 'Stahl (S235/S355)' },
+    'Edelstahl': { dichte: 0.00790, name: 'Edelstahl (1.4301)' },
+    'Aluminium': { dichte: 0.00270, name: 'Aluminium (AlMg3/6082)' },
+    'Messing':   { dichte: 0.00850, name: 'Messing (CuZn39Pb3)' },
+    'Kupfer':    { dichte: 0.00893, name: 'Kupfer' },
+    'Titan':     { dichte: 0.00451, name: 'Titan (Ti6Al4V)' },
+    'POM':       { dichte: 0.00142, name: 'POM (Delrin)' },
+    'PA6':       { dichte: 0.00114, name: 'PA6 (Nylon)' },
+  };
+
+  const gewichte = {};
+  for (const [key, mat] of Object.entries(materialien)) {
+    const gewichtG = volumenMm3 * mat.dichte;
+    gewichte[key] = {
+      name: mat.name,
+      gewichtG: Math.round(gewichtG * 100) / 100,
+      gewichtKg: Math.round((gewichtG / 1000) * 1000) / 1000,
+    };
+  }
+  return gewichte;
 }
 
 // ─── Bounding Box aus B-Rep berechnen ────────────────────────────────────────
@@ -503,18 +736,26 @@ export async function analyzeStepFile(file) {
 
   const mesh = meshData?.combinedMesh || { vertices: new Float32Array(0), indices: new Uint32Array(0) };
 
+  // STEP-Metadaten aus Header parsen
+  const metadaten = parseStepMetadata(uint8);
+
   // B-Rep Analyse versuchen
   if (oc) {
     try {
       const shape = await readStepShape(oc, uint8);
       const bbox              = computeBBoxBrep(oc, shape);
       const { volumen, oberflaeche } = computePropsBrep(oc, shape);
-      const result = detectFeaturesBrep(oc, shape);
+      const result = detectFeaturesBrep(oc, shape, bbox);
+      const gewichte = berechneGewicht(volumen);
 
       console.log('B-Rep Analyse erfolgreich:', {
         faceTypes: result.features.faceTypes,
         bohrungen: result.bohrungen.length,
         radien: result.radien.length,
+        fasen: result.fasen.length,
+        senkungen: result.senkungen.length,
+        gewinde: result.gewindeBohrungen.length,
+        minInnenradius: result.minInnenradius,
       });
 
       return {
@@ -530,8 +771,14 @@ export async function analyzeStepFile(file) {
         features: result.features,
         bohrungen: result.bohrungen,
         radien: result.radien,
+        fasen: result.fasen,
+        senkungen: result.senkungen,
         konen: result.konen,
         sphaeren: result.sphaeren,
+        gewindeBohrungen: result.gewindeBohrungen,
+        minInnenradius: result.minInnenradius,
+        gewichte,
+        metadaten,
         mesh,
         analyseModus: 'brep',
       };
@@ -547,5 +794,6 @@ export async function analyzeStepFile(file) {
 
   console.log('Verwende Mesh-Fallback Analyse...');
   const fallback = analyzeMeshFallback(meshData.rawMeshes);
-  return { ...fallback, mesh };
+  const gewichte = berechneGewicht(Math.abs(fallback.volumenMm3));
+  return { ...fallback, gewichte, metadaten, mesh };
 }

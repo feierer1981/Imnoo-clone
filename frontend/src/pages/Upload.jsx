@@ -85,13 +85,7 @@ function Upload() {
       state: {
         fromUpload: true,
         dateiname: selectedFile?.name,
-        laenge: analysisResult.abmessungen.laenge,
-        breite: analysisResult.abmessungen.breite,
-        hoehe: analysisResult.abmessungen.hoehe,
-        volumenCm3: analysisResult.volumenCm3,
-        features: analysisResult.features,
-        bohrungen: analysisResult.bohrungen,
-        radien: analysisResult.radien,
+        ...analysisResult,
       },
     });
   };
@@ -305,27 +299,82 @@ function Upload() {
             {/* Erkannte Geometrie-Features */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <h2 className="text-lg font-semibold text-gray-800 mb-4">
-                Erkannte Geometrie-Features
+                CNC-relevante Features
               </h2>
 
-              {/* Bohrungen (360° Zylinder) */}
+              {/* Bohrungen */}
               {analysisResult.bohrungen?.length > 0 && (
                 <div className="mb-4">
                   <h3 className="text-sm font-medium text-gray-600 mb-2">
-                    Bohrungen / Zylinder ({analysisResult.bohrungen.reduce((s, b) => s + (b.anzahl || 1), 0)})
+                    Bohrungen ({analysisResult.bohrungen.reduce((s, b) => s + (b.anzahl || 1), 0)})
                   </h3>
                   <div className="space-y-1.5">
                     {analysisResult.bohrungen.map((b, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between py-2 px-3 bg-amber-50 rounded-lg text-sm"
-                      >
-                        <span className="text-amber-800">
-                          &oslash; {b.durchmesser} mm
-                          {b.anzahl > 1 && <span className="text-amber-600 ml-1">(&times;{b.anzahl})</span>}
-                        </span>
-                        <span className="text-amber-700">
-                          T: {b.hoehe} mm
+                      <div key={i} className="py-2 px-3 bg-amber-50 rounded-lg text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-amber-800 font-medium">
+                            &oslash; {b.durchmesser} mm
+                            {b.anzahl > 1 && <span className="text-amber-600 ml-1">(&times;{b.anzahl})</span>}
+                          </span>
+                          <span className="text-amber-700">T: {b.hoehe} mm</span>
+                        </div>
+                        <div className="flex gap-2 mt-1 flex-wrap">
+                          {b.typ && (
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${b.konkav ? 'bg-amber-200 text-amber-900' : 'bg-green-200 text-green-900'}`}>
+                              {b.typ}
+                            </span>
+                          )}
+                          {b.durchgang !== undefined && (
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${b.durchgang ? 'bg-blue-200 text-blue-900' : 'bg-gray-200 text-gray-700'}`}>
+                              {b.durchgang ? 'Durchgang' : 'Sackloch'}
+                            </span>
+                          )}
+                          {b.gewinde && (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-red-200 text-red-900 font-medium">
+                              {b.gewinde}
+                            </span>
+                          )}
+                          {b.hatSenkung && (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-orange-200 text-orange-900">
+                              Senkung
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Gewinde-Zusammenfassung */}
+              {analysisResult.gewindeBohrungen?.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-medium text-gray-600 mb-2">
+                    Gewinde ({analysisResult.gewindeBohrungen.length})
+                  </h3>
+                  <div className="space-y-1.5">
+                    {analysisResult.gewindeBohrungen.map((g, i) => (
+                      <div key={i} className="flex items-center justify-between py-2 px-3 bg-red-50 rounded-lg text-sm">
+                        <span className="text-red-800 font-medium">{g.gewinde}</span>
+                        <span className="text-red-700">Kernloch &oslash;{g.durchmesser} mm, T: {g.hoehe} mm</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Fasen */}
+              {analysisResult.fasen?.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-medium text-gray-600 mb-2">
+                    Fasen ({analysisResult.fasen.reduce((s, f) => s + (f.anzahl || 1), 0)})
+                  </h3>
+                  <div className="space-y-1.5">
+                    {analysisResult.fasen.map((f, i) => (
+                      <div key={i} className="flex items-center justify-between py-2 px-3 bg-orange-50 rounded-lg text-sm">
+                        <span className="text-orange-800">
+                          {f.halbwinkel}&deg; &times; {f.hoehe} mm
+                          {f.anzahl > 1 && <span className="text-orange-600 ml-1">(&times;{f.anzahl})</span>}
                         </span>
                       </div>
                     ))}
@@ -333,7 +382,27 @@ function Upload() {
                 </div>
               )}
 
-              {/* Radien (< 360° Zylinder) */}
+              {/* Senkungen */}
+              {analysisResult.senkungen?.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-medium text-gray-600 mb-2">
+                    Senkungen ({analysisResult.senkungen.reduce((s, f) => s + (f.anzahl || 1), 0)})
+                  </h3>
+                  <div className="space-y-1.5">
+                    {analysisResult.senkungen.map((s, i) => (
+                      <div key={i} className="flex items-center justify-between py-2 px-3 bg-violet-50 rounded-lg text-sm">
+                        <span className="text-violet-800">
+                          &oslash; {s.durchmesser} mm, {s.halbwinkel}&deg;
+                          {s.anzahl > 1 && <span className="text-violet-600 ml-1">(&times;{s.anzahl})</span>}
+                        </span>
+                        {s.zuBohrung && <span className="text-violet-700 text-xs">zu &oslash;{s.zuBohrung}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Radien */}
               {analysisResult.radien?.length > 0 && (
                 <div className="mb-4">
                   <h3 className="text-sm font-medium text-gray-600 mb-2">
@@ -341,83 +410,95 @@ function Upload() {
                   </h3>
                   <div className="space-y-1.5">
                     {analysisResult.radien.map((r, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between py-2 px-3 bg-sky-50 rounded-lg text-sm"
-                      >
+                      <div key={i} className="flex items-center justify-between py-2 px-3 bg-sky-50 rounded-lg text-sm">
                         <span className="text-sky-800">
                           R{r.radius} mm
                           {r.anzahl > 1 && <span className="text-sky-600 ml-1">(&times;{r.anzahl})</span>}
                         </span>
-                        <span className="text-sky-700">
-                          {r.winkelGrad}&deg;
-                        </span>
+                        <span className="text-sky-700">{r.winkelGrad}&deg;</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* Konen */}
-              {analysisResult.konen?.length > 0 && (
-                <div className="mb-4">
-                  <h3 className="text-sm font-medium text-gray-600 mb-2">
-                    Konische Flaechen ({analysisResult.konen.length})
-                  </h3>
-                  <div className="space-y-1.5">
-                    {analysisResult.konen.map((k, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between py-2 px-3 bg-orange-50 rounded-lg text-sm"
-                      >
-                        <span className="text-orange-800">Konus #{i + 1}</span>
-                        <span className="text-orange-700">
-                          R: {k.radiusRef} mm, Winkel: {k.halbwinkel}&deg;
-                        </span>
-                      </div>
-                    ))}
+              {/* Min. Werkzeugradius */}
+              {analysisResult.minInnenradius > 0 && (
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Min. Innenradius (Werkzeug)</span>
+                    <span className="font-semibold text-gray-800">R{analysisResult.minInnenradius} mm</span>
                   </div>
                 </div>
-              )}
-
-              {/* Sphaeren */}
-              {analysisResult.sphaeren?.length > 0 && (
-                <div className="mb-4">
-                  <h3 className="text-sm font-medium text-gray-600 mb-2">
-                    Sphaerische Flaechen ({analysisResult.sphaeren.length})
-                  </h3>
-                  <div className="space-y-1.5">
-                    {analysisResult.sphaeren.map((s, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between py-2 px-3 bg-purple-50 rounded-lg text-sm"
-                      >
-                        <span className="text-purple-800">Kugel #{i + 1}</span>
-                        <span className="text-purple-700">
-                          &oslash; {s.durchmesser} mm
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Keine Features */}
-              {(!analysisResult.bohrungen || analysisResult.bohrungen.length === 0) &&
-               (!analysisResult.radien || analysisResult.radien.length === 0) &&
-               (!analysisResult.konen || analysisResult.konen.length === 0) &&
-               (!analysisResult.sphaeren || analysisResult.sphaeren.length === 0) && (
-                <p className="text-gray-500 text-sm">
-                  Nur planare und Freiform-Flaechen erkannt.
-                </p>
               )}
 
               <p className="text-xs text-gray-400 mt-3">
                 {analysisResult.analyseModus === 'brep'
-                  ? 'Erkennung basiert auf B-Rep Flaechenanalyse mit OpenCascade.'
-                  : 'Erkennung basiert auf Mesh-Analyse (B-Rep war nicht verfuegbar).'}
+                  ? 'B-Rep Flaechenanalyse mit OpenCascade.'
+                  : 'Mesh-Analyse (B-Rep nicht verfuegbar).'}
               </p>
             </div>
+          </div>
+
+          {/* Gewicht & Metadaten */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Gewicht nach Material */}
+            {analysisResult.gewichte && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <h2 className="text-lg font-semibold text-gray-800 mb-4">Gewicht nach Material</h2>
+                <div className="space-y-2">
+                  {Object.entries(analysisResult.gewichte).map(([key, mat]) => (
+                    <div key={key} className="flex justify-between py-1.5 px-3 bg-gray-50 rounded-lg text-sm">
+                      <span className="text-gray-700">{mat.name}</span>
+                      <span className="font-semibold text-gray-800">
+                        {mat.gewichtG < 1000
+                          ? `${mat.gewichtG} g`
+                          : `${mat.gewichtKg} kg`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* STEP-Metadaten */}
+            {analysisResult.metadaten && Object.keys(analysisResult.metadaten).length > 0 && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <h2 className="text-lg font-semibold text-gray-800 mb-4">STEP-Metadaten</h2>
+                <div className="space-y-2 text-sm">
+                  {analysisResult.metadaten.dateiname && (
+                    <div className="flex justify-between py-1.5">
+                      <span className="text-gray-600">Bauteilname</span>
+                      <span className="font-medium text-gray-800">{analysisResult.metadaten.dateiname}</span>
+                    </div>
+                  )}
+                  {analysisResult.metadaten.beschreibung && (
+                    <div className="flex justify-between py-1.5">
+                      <span className="text-gray-600">Format</span>
+                      <span className="font-medium text-gray-800">{analysisResult.metadaten.beschreibung}</span>
+                    </div>
+                  )}
+                  {analysisResult.metadaten.cadSystem && (
+                    <div className="flex justify-between py-1.5">
+                      <span className="text-gray-600">CAD-System</span>
+                      <span className="font-medium text-gray-800">{analysisResult.metadaten.cadSystem}</span>
+                    </div>
+                  )}
+                  {analysisResult.metadaten.erstelldatum && (
+                    <div className="flex justify-between py-1.5">
+                      <span className="text-gray-600">Erstellt</span>
+                      <span className="font-medium text-gray-800">{analysisResult.metadaten.erstelldatum}</span>
+                    </div>
+                  )}
+                  {analysisResult.metadaten.schema && (
+                    <div className="flex justify-between py-1.5">
+                      <span className="text-gray-600">Schema</span>
+                      <span className="font-medium text-gray-800">{analysisResult.metadaten.schema}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Aktions-Buttons */}
