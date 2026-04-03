@@ -8,6 +8,11 @@ function ProtectedRoute({ children }) {
     return <Navigate to="/login" replace />;
   }
 
+  // Admin wird automatisch zum Admin-Panel weitergeleitet
+  if (user?.rolle === 'admin') {
+    return <Navigate to="/admin" replace />;
+  }
+
   // Nutzer mit rolle "none" - Freischaltung ausstehend
   if (user?.rolle === 'none') {
     return (
