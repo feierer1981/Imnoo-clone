@@ -66,7 +66,7 @@ export function AuthProvider({ children }) {
     const result = await createUserWithEmailAndPassword(auth, email, password);
     await updateProfile(result.user, { displayName: name });
 
-    // User-Dokument in Firestore anlegen mit rolle "none"
+    // User-Dokument ZUERST anlegen, bevor onAuthStateChanged die Rolle liest
     await setDoc(doc(db, 'users', result.user.uid), {
       name,
       email,
@@ -74,6 +74,7 @@ export function AuthProvider({ children }) {
       erstelltAm: new Date().toISOString(),
     });
 
+    // User-State direkt setzen (onAuthStateChanged wird es nochmal laden)
     setUser({
       uid: result.user.uid,
       name,
