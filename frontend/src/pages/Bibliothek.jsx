@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { collection, query, orderBy, getDocs, updateDoc, deleteDoc, doc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject, getBlob } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { analyzeStepFile } from '../services/occtService';
@@ -77,9 +77,9 @@ function StepViewerModal({ bauteil, onClose }) {
     async function load() {
       try {
         setStatus('STP-Datei wird geladen...');
-        const response = await fetch(bauteil.stpUrl);
-        if (!response.ok) throw new Error('Download fehlgeschlagen');
-        const blob = await response.blob();
+        const storagePath = getStoragePath(bauteil.stpUrl);
+        if (!storagePath) throw new Error('Ungültiger Dateipfad');
+        const blob = await getBlob(ref(storage, storagePath));
         const file = new File([blob], bauteil.dateiname, { type: 'application/octet-stream' });
 
         setStatus('OpenCascade WASM wird initialisiert...');
