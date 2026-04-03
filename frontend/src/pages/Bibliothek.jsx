@@ -1,21 +1,25 @@
 import { useState, useEffect } from 'react';
 import { collection, query, orderBy, getDocs } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { db } from '../firebase';
+import { useAuth } from '../context/AuthContext';
 
 function Bibliothek() {
+  const { user } = useAuth();
   const [bauteile, setBauteile] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     loadBauteile();
-  }, []);
+  }, [user?.uid]);
 
   const loadBauteile = async () => {
+    if (!user?.uid) return;
     setLoading(true);
     setError(null);
     try {
-      const q = query(collection(db, 'bauteile'), orderBy('erstelltAm', 'desc'));
+      // Nur eigene Bauteile laden: users/{uid}/bauteile
+      const q = query(collection(db, 'users', user.uid, 'bauteile'), orderBy('erstelltAm', 'desc'));
       const snapshot = await getDocs(q);
       const items = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setBauteile(items);

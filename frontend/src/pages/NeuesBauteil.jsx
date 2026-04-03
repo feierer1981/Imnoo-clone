@@ -2,12 +2,14 @@ import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, auth } from '../firebase';
+import { db, storage } from '../firebase';
+import { useAuth } from '../context/AuthContext';
 import { analyzeStepFile } from '../services/occtService';
 import StepViewer from '../components/StepViewer';
 
 function NeuesBauteil() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [dragOver, setDragOver] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('');
@@ -105,18 +107,18 @@ function NeuesBauteil() {
     setError(null);
 
     try {
-      const userId = auth.currentUser?.uid || 'anonymous';
+      const uid = user.uid;
       const ts = Date.now();
 
-      // STP in Storage hochladen
-      const stpRef = ref(storage, `bauteile/${userId}/${ts}_${selectedFile.name}`);
+      // STP in Storage hochladen (unter bauteile/{uid}/)
+      const stpRef = ref(storage, `bauteile/${uid}/${ts}_${selectedFile.name}`);
       await uploadBytes(stpRef, selectedFile);
       const stpUrl = await getDownloadURL(stpRef);
 
       // PDF in Storage hochladen (optional)
       let pdfUrl = null;
       if (pdfFile) {
-        const pdfRef = ref(storage, `bauteile/${userId}/${ts}_${pdfFile.name}`);
+        const pdfRef = ref(storage, `bauteile/${uid}/${ts}_${pdfFile.name}`);
         await uploadBytes(pdfRef, pdfFile);
         pdfUrl = await getDownloadURL(pdfRef);
       }
@@ -125,14 +127,13 @@ function NeuesBauteil() {
       const analyseData = { ...analysisResult };
       delete analyseData.mesh;
 
-      // Bauteil in Firestore speichern
-      await addDoc(collection(db, 'bauteile'), {
+      // Bauteil in Firestore speichern (unter users/{uid}/bauteile/)
+      await addDoc(collection(db, 'users', uid, 'bauteile'), {
         name: bauteilName.trim(),
         dateiname: selectedFile.name,
         stpUrl,
         pdfUrl,
         pdfDateiname: pdfFile?.name || null,
-        userId,
         analyse: analyseData,
         erstelltAm: serverTimestamp(),
       });
