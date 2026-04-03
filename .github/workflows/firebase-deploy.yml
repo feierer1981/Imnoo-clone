@@ -60,46 +60,41 @@ jobs:
 
           base = f'https://firebaserules.googleapis.com/v1/projects/{project}'
 
-          # --- Firestore Rules ---
-          resp = requests.post(f'{base}/rulesets', headers=headers, json={
-              'source': {'files': [{'content': firestore_rules, 'name': 'firestore.rules'}]}
-          })
-          if not resp.ok:
-              print(f'Fehler Firestore Ruleset: {resp.status_code} {resp.text}', file=sys.stderr)
-              sys.exit(1)
-          fs_ruleset = resp.json()['name']
+          def create_ruleset(content, filename):
+              resp = requests.post(f'{base}/rulesets', headers=headers, json={
+                  'source': {'files': [{'content': content, 'name': filename}]}
+              })
+              if not resp.ok:
+                  print(f'Ruleset Fehler ({filename}): {resp.status_code} {resp.text}', file=sys.stderr)
+                  sys.exit(1)
+              return resp.json()['name']
 
-          resp = requests.patch(
-              f'{base}/releases/cloud.firestore',
-              headers=headers,
-              params={'updateMask': 'release.ruleset_name'},
-              json={'release': {'name': f'{base}/releases/cloud.firestore', 'rulesetName': fs_ruleset}}
-          )
-          if not resp.ok:
-              print(f'Fehler Firestore Release: {resp.status_code} {resp.text}', file=sys.stderr)
-              sys.exit(1)
+          def set_release(release_name, ruleset_name):
+              """PATCH wenn vorhanden, sonst POST anlegen."""
+              full_name = f'projects/{project}/releases/{release_name}'
+              body = {
+                  'release': {'name': full_name, 'rulesetName': ruleset_name},
+                  'updateMask': 'rulesetName'
+              }
+              resp = requests.patch(f'{base}/releases/{release_name}', headers=headers, json=body)
+              if resp.status_code == 404:
+                  resp = requests.post(f'{base}/releases', headers=headers, json={
+                      'name': full_name,
+                      'rulesetName': ruleset_name
+                  })
+              if not resp.ok:
+                  print(f'Release Fehler ({release_name}): {resp.status_code} {resp.text}', file=sys.stderr)
+                  sys.exit(1)
+
+          # --- Firestore Rules ---
+          fs_ruleset = create_ruleset(firestore_rules, 'firestore.rules')
+          set_release('cloud.firestore', fs_ruleset)
           print(f'Firestore Rules deployed: {fs_ruleset}')
 
           # --- Storage Rules ---
           bucket = f'{project}.firebasestorage.app'
-          resp = requests.post(f'{base}/rulesets', headers=headers, json={
-              'source': {'files': [{'content': storage_rules, 'name': 'storage.rules'}]}
-          })
-          if not resp.ok:
-              print(f'Fehler Storage Ruleset: {resp.status_code} {resp.text}', file=sys.stderr)
-              sys.exit(1)
-          st_ruleset = resp.json()['name']
-
-          release_name = f'firebase.storage/{bucket}'
-          resp = requests.patch(
-              f'{base}/releases/{release_name}',
-              headers=headers,
-              params={'updateMask': 'release.ruleset_name'},
-              json={'release': {'name': f'{base}/releases/{release_name}', 'rulesetName': st_ruleset}}
-          )
-          if not resp.ok:
-              print(f'Fehler Storage Release: {resp.status_code} {resp.text}', file=sys.stderr)
-              sys.exit(1)
+          st_ruleset = create_ruleset(storage_rules, 'storage.rules')
+          set_release(f'firebase.storage/{bucket}', st_ruleset)
           print(f'Storage Rules deployed: {st_ruleset}')
           PYEOF
 
