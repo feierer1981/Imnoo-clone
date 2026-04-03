@@ -28,16 +28,80 @@ jobs:
         run: npm run build
         working-directory: frontend
 
-      - name: Firebase CLI installieren
-        run: npm install -g firebase-tools
-
-      - name: Firestore und Storage Rules deployen
+      - name: Firestore und Storage Rules deployen (REST API)
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          PROJECT_ID: cnc-calc-9b89b
         run: |
-          echo "$FIREBASE_SERVICE_ACCOUNT" > /tmp/service-account.json
-          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/service-account.json
-          firebase deploy --only firestore:rules,storage --project cnc-calc-9b89b
+          pip install --quiet google-auth requests
+          python3 << 'PYEOF'
+          import json, os, sys
+          import requests
+          from google.oauth2 import service_account
+          from google.auth.transport.requests import Request
+
+          sa_info = json.loads(os.environ['FIREBASE_SERVICE_ACCOUNT'])
+          project = os.environ['PROJECT_ID']
+
+          credentials = service_account.Credentials.from_service_account_info(
+              sa_info,
+              scopes=['https://www.googleapis.com/auth/cloud-platform']
+          )
+          credentials.refresh(Request())
+          headers = {
+              'Authorization': f'Bearer {credentials.token}',
+              'Content-Type': 'application/json'
+          }
+
+          with open('firestore.rules') as f:
+              firestore_rules = f.read()
+          with open('storage.rules') as f:
+              storage_rules = f.read()
+
+          base = f'https://firebaserules.googleapis.com/v1/projects/{project}'
+
+          # --- Firestore Rules ---
+          resp = requests.post(f'{base}/rulesets', headers=headers, json={
+              'source': {'files': [{'content': firestore_rules, 'name': 'firestore.rules'}]}
+          })
+          if not resp.ok:
+              print(f'Fehler Firestore Ruleset: {resp.status_code} {resp.text}', file=sys.stderr)
+              sys.exit(1)
+          fs_ruleset = resp.json()['name']
+
+          resp = requests.patch(
+              f'{base}/releases/cloud.firestore',
+              headers=headers,
+              params={'updateMask': 'release.ruleset_name'},
+              json={'release': {'name': f'{base}/releases/cloud.firestore', 'rulesetName': fs_ruleset}}
+          )
+          if not resp.ok:
+              print(f'Fehler Firestore Release: {resp.status_code} {resp.text}', file=sys.stderr)
+              sys.exit(1)
+          print(f'Firestore Rules deployed: {fs_ruleset}')
+
+          # --- Storage Rules ---
+          bucket = f'{project}.firebasestorage.app'
+          resp = requests.post(f'{base}/rulesets', headers=headers, json={
+              'source': {'files': [{'content': storage_rules, 'name': 'storage.rules'}]}
+          })
+          if not resp.ok:
+              print(f'Fehler Storage Ruleset: {resp.status_code} {resp.text}', file=sys.stderr)
+              sys.exit(1)
+          st_ruleset = resp.json()['name']
+
+          release_name = f'firebase.storage/{bucket}'
+          resp = requests.patch(
+              f'{base}/releases/{release_name}',
+              headers=headers,
+              params={'updateMask': 'release.ruleset_name'},
+              json={'release': {'name': f'{base}/releases/{release_name}', 'rulesetName': st_ruleset}}
+          )
+          if not resp.ok:
+              print(f'Fehler Storage Release: {resp.status_code} {resp.text}', file=sys.stderr)
+              sys.exit(1)
+          print(f'Storage Rules deployed: {st_ruleset}')
+          PYEOF
 
       - name: Firebase Hosting deployen
         uses: FirebaseExtended/action-hosting-deploy@v0
