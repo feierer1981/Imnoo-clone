@@ -3,6 +3,8 @@ import { collection, query, orderBy, getDocs, updateDoc, deleteDoc, doc } from '
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { useAuth } from '../context/AuthContext';
+import { analyzeStepFile } from '../services/occtService';
+import StepViewer from '../components/StepViewer';
 
 // Extrahiert den Storage-Pfad aus einer Firebase-Download-URL
 function getStoragePath(url) {
@@ -53,6 +55,91 @@ function PdfModal({ bauteil, onClose }) {
           </div>
         </div>
         <iframe src={bauteil.pdfUrl} className="flex-1 w-full rounded-b-xl" title={`PDF – ${bauteil.name}`} />
+      </div>
+    </div>
+  );
+}
+
+// ─── 3D-Viewer Modal ─────────────────────────────────────────────────────────
+function StepViewerModal({ bauteil, onClose }) {
+  const [meshData, setMeshData] = useState(null);
+  const [status, setStatus] = useState('STP-Datei wird geladen...');
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        setStatus('STP-Datei wird geladen...');
+        const response = await fetch(bauteil.stpUrl);
+        if (!response.ok) throw new Error('Download fehlgeschlagen');
+        const blob = await response.blob();
+        const file = new File([blob], bauteil.dateiname, { type: 'application/octet-stream' });
+
+        setStatus('OpenCascade WASM wird initialisiert...');
+        const result = await analyzeStepFile(file);
+        if (!cancelled) setMeshData(result.mesh);
+      } catch (err) {
+        if (!cancelled) setError('3D-Modell konnte nicht geladen werden: ' + err.message);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [bauteil]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-2xl flex flex-col w-full max-w-4xl"
+        style={{ height: '90vh' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="font-semibold text-gray-800">{bauteil.name}</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{bauteil.dateiname}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Inhalt */}
+        <div className="flex-1 p-5 overflow-hidden">
+          {error ? (
+            <div className="h-full flex items-center justify-center">
+              <div className="text-center">
+                <svg className="w-12 h-12 mx-auto text-red-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-red-600 text-sm font-medium">{error}</p>
+              </div>
+            </div>
+          ) : !meshData ? (
+            <div className="h-full flex items-center justify-center">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4" />
+                <p className="text-gray-600 font-medium">{status}</p>
+                <p className="text-gray-400 text-sm mt-1">
+                  Erster Ladevorgang kann 10–20 Sekunden dauern
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="h-full">
+              <StepViewer meshData={meshData} height={window.innerHeight * 0.9 - 120} />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -238,6 +325,7 @@ function Bibliothek() {
   const [error, setError] = useState(null);
   const [suchbegriff, setSuchbegriff] = useState('');
   const [previewBauteil, setPreviewBauteil] = useState(null);
+  const [viewerBauteil, setViewerBauteil] = useState(null);
   const [editBauteil, setEditBauteil] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deleting, setDeleting] = useState(null);
@@ -295,6 +383,7 @@ function Bibliothek() {
   return (
     <div>
       {previewBauteil && <PdfModal bauteil={previewBauteil} onClose={() => setPreviewBauteil(null)} />}
+      {viewerBauteil && <StepViewerModal bauteil={viewerBauteil} onClose={() => setViewerBauteil(null)} />}
       {editBauteil && <EditModal bauteil={editBauteil} onClose={() => setEditBauteil(null)} onSaved={handleSaved} />}
 
       {/* Header */}
@@ -472,6 +561,15 @@ function Bibliothek() {
                     </div>
 
                     <div className="flex gap-2">
+                      {bt.stpUrl && (
+                        <button onClick={() => setViewerBauteil(bt)}
+                          className="flex-1 text-sm py-2 px-3 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 font-medium transition-colors flex items-center justify-center gap-1">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                          </svg>
+                          3D Modell
+                        </button>
+                      )}
                       <button onClick={() => setEditBauteil(bt)}
                         className="flex-1 text-sm py-2 px-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-colors flex items-center justify-center gap-1">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
