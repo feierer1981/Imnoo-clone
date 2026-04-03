@@ -5,7 +5,8 @@ import Dashboard from './pages/Dashboard';
 import Kalkulation from './pages/Kalkulation';
 import Materialpreise from './pages/Materialpreise';
 import Angebote from './pages/Angebote';
-import Upload from './pages/Upload';
+import NeuesBauteil from './pages/NeuesBauteil';
+import Bibliothek from './pages/Bibliothek';
 import OcctTest from './pages/OcctTest';
 import Login from './pages/Login';
 import Registrierung from './pages/Registrierung';
@@ -30,7 +31,8 @@ function App() {
         <Route path="kalkulation" element={<Kalkulation />} />
         <Route path="materialpreise" element={<Materialpreise />} />
         <Route path="angebote" element={<Angebote />} />
-        <Route path="upload" element={<Upload />} />
+        <Route path="neues-bauteil" element={<NeuesBauteil />} />
+        <Route path="bibliothek" element={<Bibliothek />} />
         <Route path="occt-test" element={<OcctTest />} />
       </Route>
     </Routes>
