@@ -91,6 +91,7 @@ export function AuthProvider({ children }) {
 
   const isAuthenticated = !!user;
   const isAuthorized = isAuthenticated && user?.rolle === 'user';
+  const isAdmin = isAuthenticated && user?.rolle === 'admin';
 
   if (loading) {
     return (
@@ -104,7 +105,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout, isAuthenticated, isAuthorized }}>
+    <AuthContext.Provider value={{ user, login, register, logout, isAuthenticated, isAuthorized, isAdmin }}>
       {children}
     </AuthContext.Provider>
   );
