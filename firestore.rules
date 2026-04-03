@@ -1,16 +1,48 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Nur authentifizierte Benutzer duerfen lesen und schreiben
+
+    // Hilfsfunktion: Rolle des Nutzers aus users/{uid} lesen
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.rolle;
+    }
+
+    function isUser() {
+      return request.auth != null && getUserRole() == 'user';
+    }
+
+    // users/{uid} - Nutzer darf eigenes Profil lesen, nur Admin aendert rolle
+    match /users/{userId} {
+      // Jeder authentifizierte Nutzer darf sein eigenes Profil lesen
+      allow read: if request.auth != null && request.auth.uid == userId;
+      // Erstellen bei Registrierung erlaubt (rolle muss "none" sein)
+      allow create: if request.auth != null && request.auth.uid == userId
+                    && request.resource.data.rolle == 'none';
+      // Update nur durch Admin (manuell in Firebase Console)
+      allow update, delete: if false;
+
+      // users/{uid}/bauteile - nur freigeschaltete Nutzer
+      match /bauteile/{bauteilId} {
+        allow read: if request.auth != null && request.auth.uid == userId && isUser();
+        allow create: if request.auth != null && request.auth.uid == userId && isUser();
+        allow update, delete: if request.auth != null && request.auth.uid == userId && isUser();
+      }
+    }
+
+    // Kalkulationen - nur freigeschaltete Nutzer, eigene Daten
     match /kalkulationen/{docId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isUser();
     }
+
+    // Angebote - nur freigeschaltete Nutzer
     match /angebote/{docId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isUser();
     }
+
+    // Materialpreise - lesen fuer alle freigeschalteten Nutzer
     match /materialpreise/{docId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.token.admin == true;
+      allow read: if isUser();
+      allow write: if false; // Nur ueber Firebase Console
     }
   }
 }

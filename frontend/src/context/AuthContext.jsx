@@ -6,7 +6,8 @@ import {
   signOut,
   updateProfile,
 } from 'firebase/auth';
-import { auth } from '../firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db } from '../firebase';
 
 const AuthContext = createContext(null);
 
@@ -14,15 +15,30 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Rolle aus Firestore laden
+  const loadUserRole = async (firebaseUser) => {
+    try {
+      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+      if (userDoc.exists()) {
+        return userDoc.data().rolle || 'none';
+      }
+      return 'none';
+    } catch (err) {
+      console.error('Fehler beim Laden der Rolle:', err);
+      return 'none';
+    }
+  };
+
   // Firebase Auth State beobachten
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
+        const rolle = await loadUserRole(firebaseUser);
         setUser({
           uid: firebaseUser.uid,
           name: firebaseUser.displayName || firebaseUser.email,
           email: firebaseUser.email,
-          rolle: 'admin', // Spaeter aus Firestore laden
+          rolle,
         });
       } else {
         setUser(null);
@@ -35,18 +51,34 @@ export function AuthProvider({ children }) {
   // Anmeldung mit E-Mail und Passwort
   const login = async (email, password) => {
     const result = await signInWithEmailAndPassword(auth, email, password);
+    const rolle = await loadUserRole(result.user);
+    setUser({
+      uid: result.user.uid,
+      name: result.user.displayName || result.user.email,
+      email: result.user.email,
+      rolle,
+    });
     return result.user;
   };
 
-  // Registrierung mit E-Mail und Passwort
+  // Registrierung - neuer Nutzer bekommt rolle "none"
   const register = async (name, email, password) => {
     const result = await createUserWithEmailAndPassword(auth, email, password);
     await updateProfile(result.user, { displayName: name });
+
+    // User-Dokument in Firestore anlegen mit rolle "none"
+    await setDoc(doc(db, 'users', result.user.uid), {
+      name,
+      email,
+      rolle: 'none',
+      erstelltAm: new Date().toISOString(),
+    });
+
     setUser({
       uid: result.user.uid,
-      name: name,
+      name,
       email: result.user.email,
-      rolle: 'user',
+      rolle: 'none',
     });
     return result.user;
   };
@@ -58,6 +90,7 @@ export function AuthProvider({ children }) {
   };
 
   const isAuthenticated = !!user;
+  const isAuthorized = isAuthenticated && user?.rolle === 'user';
 
   if (loading) {
     return (
@@ -71,7 +104,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout, isAuthenticated }}>
+    <AuthContext.Provider value={{ user, login, register, logout, isAuthenticated, isAuthorized }}>
       {children}
     </AuthContext.Provider>
   );
