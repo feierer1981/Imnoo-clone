@@ -1,0 +1,13 @@
+[
+  {
+    "origin": [
+      "https://cnc-calc-9b89b.web.app",
+      "https://cnc-calc-9b89b.firebaseapp.com",
+      "http://localhost:5173",
+      "http://localhost:4173"
+    ],
+    "method": ["GET", "HEAD"],
+    "responseHeader": ["Content-Type", "Content-Length", "Range"],
+    "maxAgeSeconds": 3600
+  }
+]
