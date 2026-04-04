@@ -19,6 +19,8 @@ function NeuesBauteil() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [pdfFile, setPdfFile] = useState(null);
   const [bauteilName, setBauteilName] = useState('');
+  const [notiz, setNotiz] = useState('');
+  const [notizInKalkulation, setNotizInKalkulation] = useState(true);
   const fileInputRef = useRef(null);
   const pdfInputRef = useRef(null);
 
@@ -135,6 +137,8 @@ function NeuesBauteil() {
         pdfUrl,
         pdfDateiname: pdfFile?.name || null,
         analyse: analyseData,
+        notiz: notiz.trim(),
+        notizInKalkulation,
         erstelltAm: serverTimestamp(),
       });
 
@@ -182,6 +186,63 @@ function NeuesBauteil() {
           placeholder="z.B. Gehaeuse_V2"
           className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-gray-800 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
         />
+      </div>
+
+      {/* Notiz */}
+      <div className="mb-4 bg-white rounded-xl border border-gray-200 p-4">
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-sm font-medium text-gray-700">Notiz zum Bauteil</label>
+          <span className="text-xs text-gray-400">optional</span>
+        </div>
+        <textarea
+          value={notiz}
+          onChange={(e) => setNotiz(e.target.value)}
+          placeholder="z.B. Besonderheiten, Fertigungshinweise, Materialvorgaben..."
+          rows={3}
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-y"
+        />
+
+        {/* Kalkulation-Checkbox */}
+        <label className="flex items-start gap-3 mt-3 cursor-pointer group">
+          <div className="relative mt-0.5 flex-shrink-0">
+            <input
+              type="checkbox"
+              checked={notizInKalkulation}
+              onChange={(e) => setNotizInKalkulation(e.target.checked)}
+              className="sr-only"
+            />
+            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+              notizInKalkulation ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300 group-hover:border-indigo-400'
+            }`}>
+              {notizInKalkulation && (
+                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium text-gray-700">Text in Kalkulation einbinden</p>
+              <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-medium">Empfohlen</span>
+            </div>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Die Notiz wird als Prompt in der Kalkulation verwendet — z.B. für spezielle Fertigungsvorgaben oder Hinweise an den Kalkulationsassistenten.
+            </p>
+          </div>
+        </label>
+
+        {/* Hinweis wenn Checkbox deaktiviert */}
+        {!notizInKalkulation && notiz.trim() && (
+          <div className="mt-3 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p className="text-xs text-amber-700">
+              Die Notiz wird gespeichert, aber <strong>nicht</strong> als Prompt in der Kalkulation berücksichtigt. Du kannst das jederzeit in der Bibliothek ändern.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Upload-Bereiche */}
