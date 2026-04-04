@@ -116,12 +116,23 @@ function StepViewerModal({ bauteil, onClose }) {
         {/* Inhalt */}
         <div className="flex-1 p-5 overflow-hidden">
           {error ? (
-            <div className="h-full flex items-center justify-center">
-              <div className="text-center">
-                <svg className="w-12 h-12 mx-auto text-red-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <div className="h-full flex items-center justify-center p-6">
+              <div className="text-center max-w-md">
+                <svg className="w-12 h-12 mx-auto text-amber-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <p className="text-red-600 text-sm font-medium">{error}</p>
+                <p className="text-gray-700 font-medium mb-2">3D-Vorschau nicht verfügbar</p>
+                <p className="text-gray-500 text-sm mb-4">
+                  Firebase Storage CORS ist nicht konfiguriert. Der Browser blockiert den Datei-Download.
+                </p>
+                <div className="bg-slate-50 rounded-lg p-4 text-left text-xs text-gray-600 font-mono">
+                  <p className="font-semibold text-gray-700 mb-2 font-sans text-sm">Einmalige Einrichtung:</p>
+                  <p className="mb-1">1. Öffne <a href="https://shell.cloud.google.com" target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">shell.cloud.google.com</a></p>
+                  <p className="mb-1">2. Projekt wählen: <span className="bg-slate-200 px-1 rounded">cnc-calc-9b89b</span></p>
+                  <p className="mb-2">3. Befehl ausführen:</p>
+                  <code className="block bg-slate-800 text-green-400 p-3 rounded text-xs whitespace-pre-wrap">gsutil cors set cors.json gs://cnc-calc-9b89b.firebasestorage.app</code>
+                  <p className="mt-2 text-gray-500">(cors.json liegt im Projekt-Root)</p>
+                </div>
               </div>
             </div>
           ) : !meshData ? (
