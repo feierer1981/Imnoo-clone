@@ -364,6 +364,7 @@ function Bibliothek() {
     try {
       await deleteStorageFile(bt.stpUrl);
       await deleteStorageFile(bt.pdfUrl);
+      await deleteStorageFile(bt.vorschauUrl);
       await deleteDoc(doc(db, 'users', user.uid, 'bauteile', bt.id));
       setBauteile((prev) => prev.filter((b) => b.id !== bt.id));
       setConfirmDeleteId(null);
@@ -466,8 +467,29 @@ function Bibliothek() {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {gefilterteBauteile.map((bt) => (
               <div key={bt.id} className="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow flex flex-col">
-                {/* PDF-Thumbnail */}
-                {bt.pdfUrl ? (
+                {/* Vorschau-Thumbnail: 3D-Bild bevorzugt, sonst PDF-iframe */}
+                {bt.vorschauUrl ? (
+                  <div className="relative w-full overflow-hidden rounded-t-xl bg-slate-100 border-b border-gray-100 group"
+                    style={{ height: '180px' }}>
+                    <img
+                      src={bt.vorschauUrl}
+                      alt={`3D-Vorschau ${bt.name}`}
+                      className="w-full h-full object-contain"
+                    />
+                    {/* Hover-Overlay mit 3D-Viewer Button */}
+                    <div className="absolute inset-0 bg-indigo-900/0 group-hover:bg-indigo-900/15 transition-colors flex items-center justify-center">
+                      <button
+                        onClick={() => setViewerBauteil(bt)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity bg-white text-indigo-700 text-sm font-medium px-3 py-1.5 rounded-lg shadow flex items-center gap-1.5"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                        </svg>
+                        3D Modell öffnen
+                      </button>
+                    </div>
+                  </div>
+                ) : bt.pdfUrl ? (
                   <button onClick={() => setPreviewBauteil(bt)}
                     className="relative w-full overflow-hidden rounded-t-xl bg-gray-50 border-b border-gray-100 group"
                     style={{ height: '180px' }} title="PDF Vorschau öffnen">
