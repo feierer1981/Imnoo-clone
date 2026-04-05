@@ -127,6 +127,18 @@ jobs:
             --timeout=60s \
             --project=cnc-calc-9b89b
 
+          gcloud functions deploy syncUserClaims \
+            --gen2 \
+            --runtime=nodejs22 \
+            --region=europe-west1 \
+            --source=functions \
+            --entry-point=syncUserClaims \
+            --trigger-http \
+            --allow-unauthenticated \
+            --memory=128Mi \
+            --timeout=30s \
+            --project=cnc-calc-9b89b
+
       - name: Firebase Hosting deployen
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
