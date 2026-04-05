@@ -23,8 +23,28 @@ function setCors(req, res) {
   res.set("Vary", "Origin");
 }
 
+// ─── App Check Verifizierung ──────────────────────────────────────────────────
+async function verifyAppCheck(req, res) {
+  const appCheckToken = req.headers["x-firebase-appcheck"];
+  if (!appCheckToken) {
+    res.status(401).json({ error: "App Check Token fehlt." });
+    return false;
+  }
+  try {
+    await admin.appCheck().verifyToken(appCheckToken);
+    return true;
+  } catch {
+    res.status(401).json({ error: "Ungültiger App Check Token." });
+    return false;
+  }
+}
+
 // ─── Auth-Hilfsfunktion ───────────────────────────────────────────────────────
 async function verifyAndGetRole(req, res) {
+  // App Check zuerst – blockiert Bots, curl, Scripts
+  const appCheckOk = await verifyAppCheck(req, res);
+  if (!appCheckOk) return null;
+
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
     res.status(401).json({ error: "Authentifizierung erforderlich." });
