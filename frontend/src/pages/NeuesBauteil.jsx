@@ -5,6 +5,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { analyzeStepFile } from '../services/occtService';
+import { generatePreviewImage } from '../services/previewService';
 import StepViewer from '../components/StepViewer';
 
 function NeuesBauteil() {
@@ -125,6 +126,21 @@ function NeuesBauteil() {
         pdfUrl = await getDownloadURL(pdfRef);
       }
 
+      // Isometrisches Vorschaubild generieren und hochladen
+      let vorschauUrl = null;
+      if (analysisResult.mesh) {
+        try {
+          setSaving(true);
+          const previewBlob = await generatePreviewImage(analysisResult.mesh);
+          const previewRef = ref(storage, `bauteile/${uid}/${ts}_preview.jpg`);
+          await uploadBytes(previewRef, previewBlob, { contentType: 'image/jpeg' });
+          vorschauUrl = await getDownloadURL(previewRef);
+        } catch (previewErr) {
+          console.warn('Vorschaubild konnte nicht erstellt werden:', previewErr);
+          // Nicht kritisch – Bauteil wird trotzdem gespeichert
+        }
+      }
+
       // Analysedaten fuer Firestore vorbereiten (ohne mesh - zu gross)
       const analyseData = { ...analysisResult };
       delete analyseData.mesh;
@@ -139,6 +155,7 @@ function NeuesBauteil() {
         analyse: analyseData,
         notiz: notiz.trim(),
         notizInKalkulation,
+        vorschauUrl,
         erstelltAm: serverTimestamp(),
       });
 
