@@ -16,7 +16,7 @@ jobs:
       - name: Node.js einrichten
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -116,7 +116,7 @@ jobs:
         run: |
           gcloud functions deploy testGemini \
             --gen2 \
-            --runtime=nodejs20 \
+            --runtime=nodejs22 \
             --region=europe-west1 \
             --source=functions \
             --entry-point=testGemini \
