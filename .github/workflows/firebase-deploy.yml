@@ -121,7 +121,7 @@ jobs:
             --source=functions \
             --entry-point=testGemini \
             --trigger-http \
-            --no-allow-unauthenticated \
+            --allow-unauthenticated \
             --set-secrets="CNC_CALC=CNC-CALC:latest" \
             --memory=256Mi \
             --timeout=60s \
