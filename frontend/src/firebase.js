@@ -7,7 +7,7 @@ import { getFunctions } from "firebase/functions";
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-check";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDNSXOrfxdbnCr0gE9jhRXqNLB14EbcgGY",
+  apiKey: "AIzaSyDNSXOrfxdbnCr0gE9jhRXqNLB18EbcgGY",
   authDomain: "cnc-calc-9b89b.firebaseapp.com",
   projectId: "cnc-calc-9b89b",
   storageBucket: "cnc-calc-9b89b.firebasestorage.app",
