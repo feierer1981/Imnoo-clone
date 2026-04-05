@@ -103,20 +103,29 @@ jobs:
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
+      - name: gcloud SDK einrichten
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: cnc-calc-9b89b
+
       - name: Cloud Functions Abhängigkeiten installieren
         run: npm ci
         working-directory: functions
 
       - name: Cloud Functions deployen
-        uses: google-github-actions/deploy-cloud-functions@v3
-        with:
-          name: testGemini
-          runtime: nodejs20
-          region: europe-west1
-          source_dir: functions
-          project_id: cnc-calc-9b89b
-          secrets: |
-            CNC_CALC=projects/cnc-calc-9b89b/secrets/CNC-CALC/versions/latest
+        run: |
+          gcloud functions deploy testGemini \
+            --gen2 \
+            --runtime=nodejs20 \
+            --region=europe-west1 \
+            --source=functions \
+            --entry-point=testGemini \
+            --trigger-http \
+            --allow-unauthenticated=false \
+            --set-secrets="CNC_CALC=CNC-CALC:latest" \
+            --memory=256Mi \
+            --timeout=60s \
+            --project=cnc-calc-9b89b
 
       - name: Firebase Hosting deployen
         uses: FirebaseExtended/action-hosting-deploy@v0
