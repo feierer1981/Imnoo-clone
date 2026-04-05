@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { collection, getDocs, updateDoc, doc, query, orderBy } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 
+const SYNC_URL = 'https://europe-west1-cnc-calc-9b89b.cloudfunctions.net/syncUserClaims';
 const ROLLEN = ['none', 'user', 'admin'];
 
 const rolleBadge = {
@@ -43,11 +45,25 @@ function Nutzer() {
     setError(null);
     setSuccessMsg(null);
     try {
+      // 1. Firestore aktualisieren
       await updateDoc(doc(db, 'users', uid), { rolle: newRolle });
+
+      // 2. Custom Claims via Cloud Function synchronisieren
+      const idToken = await getAuth().currentUser.getIdToken();
+      const resp = await fetch(SYNC_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ uid, rolle: newRolle }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        console.warn('Custom Claims Sync fehlgeschlagen:', data.error);
+      }
+
       setNutzer((prev) =>
         prev.map((n) => (n.id === uid ? { ...n, rolle: newRolle } : n))
       );
-      setSuccessMsg('Rolle erfolgreich aktualisiert.');
+      setSuccessMsg('Rolle erfolgreich aktualisiert und Custom Claims synchronisiert.');
       setTimeout(() => setSuccessMsg(null), 3000);
     } catch (err) {
       setError('Rolle konnte nicht geändert werden: ' + err.message);
