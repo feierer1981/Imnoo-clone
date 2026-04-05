@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react';
 import { collection, getDocs, updateDoc, doc, query, orderBy } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
-import { protectedFetch } from '../../protectedFetch';
-
-const SYNC_URL = 'https://europe-west1-cnc-calc-9b89b.cloudfunctions.net/syncUserClaims';
 const ROLLEN = ['none', 'user', 'admin'];
 
 const rolleBadge = {
@@ -50,7 +48,8 @@ function Nutzer() {
 
       // 2. Custom Claims via Cloud Function synchronisieren (App Check geschützt)
       try {
-        await protectedFetch(SYNC_URL, { uid, rolle: newRolle });
+        const syncUserClaims = httpsCallable(functions, 'syncUserClaims');
+        await syncUserClaims({ uid, rolle: newRolle });
       } catch (syncErr) {
         console.warn('Custom Claims Sync fehlgeschlagen:', syncErr.message);
       }
