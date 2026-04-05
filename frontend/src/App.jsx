@@ -9,6 +9,7 @@ import Materialpreise from './pages/Materialpreise';
 import Angebote from './pages/Angebote';
 import NeuesBauteil from './pages/NeuesBauteil';
 import Bibliothek from './pages/Bibliothek';
+import Einstellungen from './pages/Einstellungen';
 import OcctTest from './pages/OcctTest';
 import Login from './pages/Login';
 import Registrierung from './pages/Registrierung';
@@ -53,6 +54,7 @@ function App() {
         <Route path="angebote" element={<Angebote />} />
         <Route path="neues-bauteil" element={<NeuesBauteil />} />
         <Route path="bibliothek" element={<Bibliothek />} />
+        <Route path="einstellungen" element={<Einstellungen />} />
         <Route path="occt-test" element={<OcctTest />} />
       </Route>
     </Routes>
