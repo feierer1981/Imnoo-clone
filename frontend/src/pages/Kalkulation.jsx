@@ -480,14 +480,17 @@ function BauteilKarte({ item, index, onChange, onRemove }) {
         </div>
       </div>
 
-      {/* Notiz (wenn vorhanden) */}
-      {item.notiz && (
-        <div className="px-4 pb-4">
-          <div className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-xs text-amber-800">
-            <span className="font-medium">Notiz: </span>{item.notiz}
-          </div>
-        </div>
-      )}
+      {/* Notiz */}
+      <div className="px-4 pb-4">
+        <label className="block text-xs text-gray-500 mb-1">Notiz</label>
+        <textarea
+          value={item.notiz || ''}
+          onChange={(e) => onChange(index, 'notiz', e.target.value)}
+          placeholder="Fertigungshinweise, Besonderheiten..."
+          rows={2}
+          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400 resize-y"
+        />
+      </div>
     </div>
   );
 }
@@ -496,16 +499,33 @@ function BauteilKarte({ item, index, onChange, onRemove }) {
 function Kalkulation() {
   const { user } = useAuth();
   const location = useLocation();
-  const [bauteileList, setBauteileList] = useState([]);
+  const storageKey = `kalk_bauteile_${user?.uid || 'guest'}`;
+
+  const [bauteileList, setBauteileList] = useState(() => {
+    try {
+      const stored = localStorage.getItem(`kalk_bauteile_${user?.uid || 'guest'}`);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
   const [gespeichert, setGespeichert] = useState(false);
   const [showBibliothek, setShowBibliothek] = useState(false);
   const [showNeuesBauteil, setShowNeuesBauteil] = useState(false);
+
+  // Bauteile-Liste im localStorage speichern
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(bauteileList));
+    } catch { /* Quota-Fehler ignorieren */ }
+  }, [bauteileList, storageKey]);
 
   // Daten aus NeuesBauteil "In Kalkulation" Button übernehmen
   useEffect(() => {
     const state = location.state;
     if (state?.fromUpload) {
-      setBauteileList([
+      setBauteileList((prev) => [
+        ...prev,
         makeDefaultItem({
           name: state.dateiname?.replace(/\.[^.]+$/, '') || '',
           laenge: String(state.laenge || ''),
