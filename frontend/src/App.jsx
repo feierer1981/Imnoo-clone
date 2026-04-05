@@ -16,6 +16,7 @@ import Registrierung from './pages/Registrierung';
 import Nutzer from './pages/Admin/Nutzer';
 import Bibliotheken from './pages/Admin/Bibliotheken';
 import PromptUebersicht from './pages/Admin/PromptUebersicht';
+import KiTest from './pages/Admin/KiTest';
 
 function App() {
   return (
@@ -37,6 +38,7 @@ function App() {
         <Route path="nutzer" element={<Nutzer />} />
         <Route path="bibliotheken" element={<Bibliotheken />} />
         <Route path="einstellungen/prompts" element={<PromptUebersicht />} />
+        <Route path="ki-test" element={<KiTest />} />
       </Route>
 
       {/* Geschuetzte Routen mit Layout */}
