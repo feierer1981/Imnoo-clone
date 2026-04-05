@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, Link } from 'react-router-dom';
 import { collection, query, orderBy, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
@@ -22,7 +22,8 @@ const oberflaechen = ['Ra 3.2', 'Ra 1.6', 'Ra 0.8'];
 const formatEur = (val) =>
   val.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
 
-function calcBauteil(item) {
+// stundensatzProH: €/h aus dem Workflow (Standard 90 €/h)
+function calcBauteil(item, stundensatzProH = 90) {
   const l = parseFloat(item.laenge) || 0;
   const b = parseFloat(item.breite) || 0;
   const h = parseFloat(item.hoehe) || 0;
@@ -30,9 +31,17 @@ function calcBauteil(item) {
   const volumenCm3 = (l * b * h) / 1000;
   const maschinenlaufzeit = volumenCm3 / 50;
   const gesamtzeit = maschinenlaufzeit + 10 + 5;
-  const stueckpreis = gesamtzeit * 1.5;
+  const rateProMin = stundensatzProH / 60;
+  const stueckpreis = gesamtzeit * rateProMin;
   return { volumenCm3, gesamtzeit, stueckpreis, gesamtpreis: stueckpreis * stueck };
 }
+
+const maschinenLabel = { fraesen: 'Fräsen ⚙️', drehen: 'Drehen 🔄' };
+const fertigungLabel = {
+  einzel: 'Einzelfertigung',
+  einzel_wiederkehrend: 'Einzel (wiederkehrend)',
+  masse: 'Massenfertigung',
+};
 
 function makeDefaultItem(overrides = {}) {
   return {
@@ -571,8 +580,8 @@ function NeuesBauteilModal({ onAdd, onClose }) {
 }
 
 // ─── BauteilKarte ─────────────────────────────────────────────────────────────
-function BauteilKarte({ item, index, onChange, onRemove }) {
-  const calc = calcBauteil(item);
+function BauteilKarte({ item, index, onChange, onRemove, stundensatz }) {
+  const calc = calcBauteil(item, stundensatz);
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -716,6 +725,7 @@ function Kalkulation() {
   const { user } = useAuth();
   const location = useLocation();
   const storageKey = `kalk_bauteile_${user?.uid || 'guest'}`;
+  const workflowStorageKey = `kalk_workflow_${user?.uid || 'guest'}`;
 
   const [bauteileList, setBauteileList] = useState(() => {
     try {
@@ -725,6 +735,11 @@ function Kalkulation() {
       return [];
     }
   });
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState(() => {
+    try { return localStorage.getItem(`kalk_workflow_${user?.uid || 'guest'}`) || ''; } catch { return ''; }
+  });
+  const [workflows, setWorkflows] = useState([]);
+  const [workflowsLoading, setWorkflowsLoading] = useState(true);
   const [gespeichert, setGespeichert] = useState(false);
   const [showBibliothek, setShowBibliothek] = useState(false);
   const [showNeuesBauteil, setShowNeuesBauteil] = useState(false);
@@ -735,6 +750,26 @@ function Kalkulation() {
       localStorage.setItem(storageKey, JSON.stringify(bauteileList));
     } catch { /* Quota-Fehler ignorieren */ }
   }, [bauteileList, storageKey]);
+
+  // Workflow-Auswahl im localStorage speichern
+  useEffect(() => {
+    try { localStorage.setItem(workflowStorageKey, selectedWorkflowId); } catch {}
+  }, [selectedWorkflowId, workflowStorageKey]);
+
+  // Workflows laden
+  useEffect(() => {
+    async function loadWorkflows() {
+      try {
+        const snap = await getDocs(collection(db, 'users', user.uid, 'workflows'));
+        setWorkflows(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setWorkflowsLoading(false);
+      }
+    }
+    loadWorkflows();
+  }, [user.uid]);
 
   // Daten aus NeuesBauteil "In Kalkulation" Button übernehmen
   useEffect(() => {
@@ -767,8 +802,11 @@ function Kalkulation() {
     setBauteileList((prev) => [...prev, makeDefaultItem({ ...overrides, id: Date.now() + Math.random() })]);
   };
 
+  const selectedWorkflow = workflows.find((w) => w.id === selectedWorkflowId) || null;
+  const stundensatz = parseFloat(selectedWorkflow?.maschinenstundensatz) || 90;
+
   const gesamtpreis = bauteileList.reduce(
-    (sum, item) => sum + calcBauteil(item).gesamtpreis,
+    (sum, item) => sum + calcBauteil(item, stundensatz).gesamtpreis,
     0
   );
 
@@ -776,8 +814,10 @@ function Kalkulation() {
     if (bauteileList.length === 0) return;
     try {
       await createKalkulation({
-        bauteile: bauteileList.map((item) => ({ ...item, ...calcBauteil(item) })),
+        bauteile: bauteileList.map((item) => ({ ...item, ...calcBauteil(item, stundensatz) })),
         gesamtpreis,
+        workflowId: selectedWorkflowId || null,
+        workflow: selectedWorkflow ? { ...selectedWorkflow } : null,
         uid: user?.uid || null,
       });
       setGespeichert(true);
@@ -817,6 +857,68 @@ function Kalkulation() {
         </div>
       </div>
 
+      {/* Workflow-Auswahl */}
+      <div className="mb-6 bg-white rounded-xl border border-gray-200 p-4">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-indigo-100 rounded-lg flex items-center justify-center flex-shrink-0">
+              <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-800">Workflow wählen</p>
+              <p className="text-xs text-gray-400">Maschinenausstattung und Stundensatz für diese Kalkulation</p>
+            </div>
+          </div>
+          {workflowsLoading ? (
+            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-600" />
+          ) : workflows.length === 0 ? (
+            <Link
+              to="/einstellungen"
+              className="text-sm text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1"
+            >
+              Workflow anlegen
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
+          ) : (
+            <select
+              value={selectedWorkflowId}
+              onChange={(e) => setSelectedWorkflowId(e.target.value)}
+              className={`border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 min-w-[220px] ${
+                !selectedWorkflowId ? 'border-amber-300 text-gray-400' : 'border-gray-300 text-gray-800'
+              }`}
+            >
+              <option value="">– Workflow wählen –</option>
+              {workflows.map((w) => (
+                <option key={w.id} value={w.id}>{w.name}</option>
+              ))}
+            </select>
+          )}
+        </div>
+        {selectedWorkflow && (
+          <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500">
+            {selectedWorkflow.maschinentyp && (
+              <span>Maschine: <strong className="text-gray-700">{maschinenLabel[selectedWorkflow.maschinentyp]}</strong></span>
+            )}
+            {selectedWorkflow.maschinenstundensatz && (
+              <span>Stundensatz: <strong className="text-gray-700">{selectedWorkflow.maschinenstundensatz} €/h</strong></span>
+            )}
+            {selectedWorkflow.fertigungstyp && (
+              <span>Fertigung: <strong className="text-gray-700">{fertigungLabel[selectedWorkflow.fertigungstyp]}</strong></span>
+            )}
+            {selectedWorkflow.ncProgramm && (
+              <span>NC: <strong className="text-gray-700">{{ manuell: 'Manuell', cam: 'CAM', archiv: 'Aus Archiv' }[selectedWorkflow.ncProgramm]}</strong></span>
+            )}
+            {(selectedWorkflow.maxBauteilLaenge || selectedWorkflow.maxBauteilBreite) && (
+              <span>Max. Bauteil: <strong className="text-gray-700">{selectedWorkflow.maxBauteilLaenge}×{selectedWorkflow.maxBauteilBreite}×{selectedWorkflow.maxBauteilHoehe} mm</strong></span>
+            )}
+          </div>
+        )}
+      </div>
+
       {bauteileList.length === 0 ? (
         /* Leer-Zustand */
         <div className="bg-white rounded-xl border-2 border-dashed border-gray-200 p-12 text-center">
@@ -853,6 +955,7 @@ function Kalkulation() {
                 index={index}
                 onChange={handleChange}
                 onRemove={handleRemove}
+                stundensatz={stundensatz}
               />
             ))}
 
@@ -886,7 +989,7 @@ function Kalkulation() {
 
               <div className="space-y-2 text-sm mb-4">
                 {bauteileList.map((item, index) => {
-                  const calc = calcBauteil(item);
+                  const calc = calcBauteil(item, stundensatz);
                   return (
                     <div key={item.id} className="flex justify-between items-center text-gray-600">
                       <span className="truncate max-w-[60%] text-gray-700">
@@ -909,7 +1012,7 @@ function Kalkulation() {
                     </span>
                   </div>
                   <p className="text-xs text-indigo-500 mt-1">
-                    {bauteileList.length} {bauteileList.length === 1 ? 'Bauteil' : 'Bauteile'}
+                    {bauteileList.length} {bauteileList.length === 1 ? 'Bauteil' : 'Bauteile'} · {stundensatz} €/h
                   </p>
                 </div>
               </div>
