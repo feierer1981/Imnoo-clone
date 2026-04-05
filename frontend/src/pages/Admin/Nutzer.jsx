@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { collection, getDocs, updateDoc, doc, query, orderBy } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
+import { protectedFetch } from '../../protectedFetch';
 
 const SYNC_URL = 'https://europe-west1-cnc-calc-9b89b.cloudfunctions.net/syncUserClaims';
 const ROLLEN = ['none', 'user', 'admin'];
@@ -48,16 +48,11 @@ function Nutzer() {
       // 1. Firestore aktualisieren
       await updateDoc(doc(db, 'users', uid), { rolle: newRolle });
 
-      // 2. Custom Claims via Cloud Function synchronisieren
-      const idToken = await getAuth().currentUser.getIdToken();
-      const resp = await fetch(SYNC_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({ uid, rolle: newRolle }),
-      });
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        console.warn('Custom Claims Sync fehlgeschlagen:', data.error);
+      // 2. Custom Claims via Cloud Function synchronisieren (App Check geschützt)
+      try {
+        await protectedFetch(SYNC_URL, { uid, rolle: newRolle });
+      } catch (syncErr) {
+        console.warn('Custom Claims Sync fehlgeschlagen:', syncErr.message);
       }
 
       setNutzer((prev) =>

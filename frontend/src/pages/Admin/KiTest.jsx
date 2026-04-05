@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getAuth } from 'firebase/auth';
+import { protectedFetch } from '../../protectedFetch';
 
 const FUNCTION_URL = 'https://europe-west1-cnc-calc-9b89b.cloudfunctions.net/testGemini';
 
@@ -16,22 +16,7 @@ function KiTest() {
     setError(null);
     setResult(null);
     try {
-      const auth = getAuth();
-      const user = auth.currentUser;
-      if (!user) throw new Error('Nicht eingeloggt.');
-      const idToken = await user.getIdToken();
-
-      const response = await fetch(FUNCTION_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({ prompt }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      const data = await protectedFetch(FUNCTION_URL, { prompt });
       setResult(data);
     } catch (err) {
       console.error('KI-Test Fehler:', err);
