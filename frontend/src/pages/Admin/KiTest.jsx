@@ -39,7 +39,7 @@ function KiTest() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-xs text-gray-500 font-medium">Modell</p>
-          <p className="text-lg font-bold text-gray-800 mt-1">gemini-3.1-pro-preview</p>
+          <p className="text-lg font-bold text-gray-800 mt-1">gemini-2.0-flash</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-xs text-gray-500 font-medium">Region</p>
@@ -160,7 +160,7 @@ function KiTest() {
           <p>1. Frontend ruft <code>httpsCallable(functions, 'testGemini')</code> auf</p>
           <p>2. Cloud Function (europe-west1) prüft Auth + Admin-Rolle</p>
           <p>3. API-Key wird aus Secret Manager ("CNC-CALC") geladen</p>
-          <p>4. Anfrage wird an <code>gemini-3.1-pro-preview</code> gesendet</p>
+          <p>4. Anfrage wird an <code>gemini-2.0-flash</code> gesendet</p>
           <p>5. Antwort wird ans Frontend zurückgegeben</p>
         </div>
       </div>
