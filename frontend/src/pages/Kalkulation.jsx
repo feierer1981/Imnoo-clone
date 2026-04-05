@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation, Link } from 'react-router-dom';
-import { collection, query, orderBy, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, addDoc, serverTimestamp, doc, where } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, storage, functions } from '../firebase';
 import { createKalkulation } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { analyzeStepFile } from '../services/occtService';
@@ -36,7 +37,7 @@ function calcBauteil(item, stundensatzProH = 90) {
   return { volumenCm3, gesamtzeit, stueckpreis, gesamtpreis: stueckpreis * stueck };
 }
 
-const maschinenLabel = { fraesen: 'Fräsen ⚙️', drehen: 'Drehen 🔄' };
+const maschinenLabel = { fraesen: 'Fräsen ⚙️', drehen: 'Drehen 🔄', fraesen_drehen: 'Fräsen + Drehen ⚙️🔄' };
 const fertigungLabel = {
   einzel: 'Einzelfertigung',
   einzel_wiederkehrend: 'Einzel (wiederkehrend)',
@@ -743,6 +744,9 @@ function Kalkulation() {
   const [gespeichert, setGespeichert] = useState(false);
   const [showBibliothek, setShowBibliothek] = useState(false);
   const [showNeuesBauteil, setShowNeuesBauteil] = useState(false);
+  const [kiLoading, setKiLoading] = useState(false);
+  const [kiErgebnis, setKiErgebnis] = useState(null);
+  const [kiError, setKiError] = useState(null);
 
   // Bauteile-Liste im localStorage speichern
   useEffect(() => {
@@ -811,11 +815,15 @@ function Kalkulation() {
   );
 
   const handleSpeichern = async () => {
-    if (bauteileList.length === 0) return;
+    if (!kiErgebnis) return;
     try {
       await createKalkulation({
-        bauteile: bauteileList.map((item) => ({ ...item, ...calcBauteil(item, stundensatz) })),
-        gesamtpreis,
+        bauteile: bauteileList.map((item) => {
+          const kiItem = kiErgebnis.bauteile?.find((b) => b.name === item.name);
+          return { ...item, ...(kiItem || {}), ki: true };
+        }),
+        gesamtpreis: kiErgebnis.gesamtpreis || 0,
+        warnungen: kiErgebnis.warnungen || [],
         workflowId: selectedWorkflowId || null,
         workflow: selectedWorkflow ? { ...selectedWorkflow } : null,
         uid: user?.uid || null,
@@ -824,6 +832,123 @@ function Kalkulation() {
       setTimeout(() => setGespeichert(false), 3000);
     } catch (err) {
       alert('Fehler beim Speichern: ' + err.message);
+    }
+  };
+
+  const handleKalkulation = async () => {
+    if (bauteileList.length === 0) return;
+    setKiLoading(true);
+    setKiError(null);
+    setKiErgebnis(null);
+
+    try {
+      // 1. "Fertigungsexperte" Prompt laden
+      const promptSnap = await getDocs(collection(db, 'prompts'));
+      const fertigungsPrompt = promptSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .find((p) => p.titel === 'Fertigungsexperte');
+
+      if (!fertigungsPrompt) {
+        setKiError('Kein Prompt mit dem Titel "Fertigungsexperte" im Admin-Bereich gefunden.');
+        setKiLoading(false);
+        return;
+      }
+
+      // 2. Materialpreise des Users laden
+      const matSnap = await getDocs(collection(db, 'users', user.uid, 'materialien'));
+      const materialPreise = matSnap.docs.map((d) => d.data());
+
+      // 3. Prompt zusammenbauen
+      let fullPrompt = fertigungsPrompt.inhalt + '\n\n';
+
+      // Workflow-Infos
+      if (selectedWorkflow) {
+        fullPrompt += '=== WORKFLOW / MASCHINENAUSSTATTUNG ===\n';
+        fullPrompt += `Name: ${selectedWorkflow.name}\n`;
+        fullPrompt += `Maschinentyp: ${maschinenLabel[selectedWorkflow.maschinentyp] || selectedWorkflow.maschinentyp}\n`;
+        if (selectedWorkflow.maschinenstundensatz) fullPrompt += `Maschinenstundensatz: ${selectedWorkflow.maschinenstundensatz} €/h\n`;
+        if (selectedWorkflow.fertigungstyp) fullPrompt += `Fertigungstyp: ${fertigungLabel[selectedWorkflow.fertigungstyp] || selectedWorkflow.fertigungstyp}\n`;
+        if (selectedWorkflow.fraeswerkzeug) fullPrompt += `Fräswerkzeug: ${selectedWorkflow.fraeswerkzeug.toUpperCase()}\n`;
+        if (selectedWorkflow.bohrwerkzeugFraesen) fullPrompt += `Bohrwerkzeug (Fräsen): ${selectedWorkflow.bohrwerkzeugFraesen.toUpperCase()}\n`;
+        if (selectedWorkflow.drehwerkzeug) fullPrompt += `Drehwerkzeug: ${selectedWorkflow.drehwerkzeug.toUpperCase()}\n`;
+        if (selectedWorkflow.bohrwerkzeugDrehen) fullPrompt += `Bohrwerkzeug (Drehen): ${selectedWorkflow.bohrwerkzeugDrehen.toUpperCase()}\n`;
+        if (selectedWorkflow.ncProgramm) fullPrompt += `NC-Programm: ${{ manuell: 'Manuell', cam: 'CAM', archiv: 'Aus Archiv' }[selectedWorkflow.ncProgramm] || selectedWorkflow.ncProgramm}\n`;
+        if (selectedWorkflow.maxBauteilLaenge) fullPrompt += `Max. Bauteil: ${selectedWorkflow.maxBauteilLaenge}×${selectedWorkflow.maxBauteilBreite}×${selectedWorkflow.maxBauteilHoehe} mm\n`;
+        fullPrompt += '\n';
+      }
+
+      // Materialpreisliste
+      fullPrompt += '=== MATERIALPREISLISTE (€/kg) ===\n';
+      materialPreise.forEach((m) => {
+        fullPrompt += `${m.werkstoff} – ${m.bezeichnung}: ${m.preis} €/kg (Dichte: ${m.dichte} kg/m³)\n`;
+      });
+      fullPrompt += '\n';
+
+      // Bauteil-Daten
+      const imageUrls = [];
+      const pdfUrls = [];
+
+      fullPrompt += '=== BAUTEILE ZUR KALKULATION ===\n\n';
+      bauteileList.forEach((item, i) => {
+        fullPrompt += `--- Bauteil ${i + 1}: ${item.name || 'Unbenannt'} ---\n`;
+        if (item.material) fullPrompt += `Material: ${item.material}\n`;
+        if (item.stueckzahl) fullPrompt += `Stückzahl: ${item.stueckzahl}\n`;
+        if (item.toleranz) fullPrompt += `Toleranz: ${item.toleranz}\n`;
+        if (item.oberflaeche) fullPrompt += `Oberfläche: ${item.oberflaeche}\n`;
+        if (item.laenge || item.breite || item.hoehe) {
+          fullPrompt += `Abmessungen (L×B×H): ${item.laenge || '?'}×${item.breite || '?'}×${item.hoehe || '?'} mm\n`;
+        }
+        if (item.notiz) fullPrompt += `Hinweis/Notiz: ${item.notiz}\n`;
+
+        // 3D-Analyse anhängen
+        if (item.analyse) {
+          fullPrompt += `\n3D-Analyse (OCCT):\n`;
+          const a = item.analyse;
+          if (a.volumen !== undefined) fullPrompt += `  Volumen: ${a.volumen} mm³\n`;
+          if (a.oberflaeche !== undefined) fullPrompt += `  Oberfläche: ${a.oberflaeche} mm²\n`;
+          if (a.boundingBox) {
+            const bb = a.boundingBox;
+            fullPrompt += `  Bounding-Box: ${bb.xSize?.toFixed(1)}×${bb.ySize?.toFixed(1)}×${bb.zSize?.toFixed(1)} mm\n`;
+          }
+          if (a.schwerpunkt) {
+            const s = a.schwerpunkt;
+            fullPrompt += `  Schwerpunkt: (${s.x?.toFixed(1)}, ${s.y?.toFixed(1)}, ${s.z?.toFixed(1)})\n`;
+          }
+          if (a.faces !== undefined) fullPrompt += `  Flächen: ${a.faces}\n`;
+          if (a.edges !== undefined) fullPrompt += `  Kanten: ${a.edges}\n`;
+          if (a.shells !== undefined) fullPrompt += `  Schalen: ${a.shells}\n`;
+          if (a.solids !== undefined) fullPrompt += `  Körper: ${a.solids}\n`;
+        }
+
+        // Bild + PDF URLs sammeln
+        if (item.vorschauUrl) imageUrls.push(item.vorschauUrl);
+        if (item.pdfUrl) pdfUrls.push(item.pdfUrl);
+
+        fullPrompt += '\n';
+      });
+
+      fullPrompt += `\nAntworte ausschließlich im JSON-Format wie vorgegeben.`;
+
+      // 4. Cloud Function aufrufen
+      const kalkuliereTeile = httpsCallable(functions, 'kalkuliereTeile');
+      const response = await kalkuliereTeile({
+        prompt: fullPrompt,
+        imageUrls,
+        pdfUrls,
+      });
+
+      if (response.data?.success && response.data.ergebnis) {
+        setKiErgebnis(response.data.ergebnis);
+      } else if (response.data?.rohtext) {
+        setKiError('KI-Antwort konnte nicht als JSON geparst werden:\n' + response.data.rohtext);
+      } else {
+        setKiError('Unerwartete Antwort von der KI.');
+      }
+    } catch (err) {
+      console.error('Kalkulation Fehler:', err);
+      setKiError(err.message || 'Kalkulation fehlgeschlagen.');
+    } finally {
+      setKiLoading(false);
     }
   };
 
@@ -982,22 +1107,147 @@ function Kalkulation() {
             </div>
           </div>
 
-          {/* Kalkulation starten */}
-          <div className="lg:col-span-1">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 sticky top-24">
+          {/* Kalkulation starten + Ergebnis */}
+          <div className="lg:col-span-1 space-y-4">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 sticky top-24 space-y-4">
               <button
-                disabled={bauteileList.length === 0}
+                onClick={handleKalkulation}
+                disabled={bauteileList.length === 0 || kiLoading}
                 className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-semibold py-3 px-4 rounded-lg transition-colors text-sm flex items-center justify-center gap-2"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                Kalkulation starten
+                {kiLoading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+                    KI kalkuliert...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    Kalkulation starten
+                  </>
+                )}
               </button>
               {bauteileList.length === 0 && (
-                <p className="text-xs text-gray-400 text-center mt-2">
+                <p className="text-xs text-gray-400 text-center">
                   Füge mindestens ein Bauteil hinzu
                 </p>
+              )}
+              {kiLoading && (
+                <p className="text-xs text-gray-400 text-center">
+                  Die KI analysiert Ihre Bauteile. Dies kann bis zu 60 Sek. dauern...
+                </p>
+              )}
+
+              {/* Fehler */}
+              {kiError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                  <p className="text-xs font-medium text-red-700 mb-1">Fehler</p>
+                  <p className="text-xs text-red-600 whitespace-pre-wrap">{kiError}</p>
+                </div>
+              )}
+
+              {/* KI-Ergebnis */}
+              {kiErgebnis && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <p className="text-sm font-semibold text-green-700">KI-Kalkulation abgeschlossen</p>
+                  </div>
+
+                  {/* Warnungen */}
+                  {kiErgebnis.warnungen?.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <p className="text-xs font-medium text-amber-700 mb-1">Hinweise</p>
+                      <ul className="text-xs text-amber-600 space-y-0.5">
+                        {kiErgebnis.warnungen.map((w, i) => (
+                          <li key={i}>• {w}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Einzelne Bauteile */}
+                  {kiErgebnis.bauteile?.map((bt, i) => (
+                    <div key={i} className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                      <p className="text-sm font-semibold text-gray-800 mb-2">{bt.name || `Bauteil ${i + 1}`}</p>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                        {bt.materialkosten !== undefined && (
+                          <>
+                            <span className="text-gray-500">Materialkosten</span>
+                            <span className="text-gray-800 font-medium text-right">{formatEur(bt.materialkosten)}</span>
+                          </>
+                        )}
+                        {bt.ruestzeit_h !== undefined && (
+                          <>
+                            <span className="text-gray-500">Rüstzeit</span>
+                            <span className="text-gray-800 font-medium text-right">{bt.ruestzeit_h} h</span>
+                          </>
+                        )}
+                        {bt.maschinenzeit_h !== undefined && (
+                          <>
+                            <span className="text-gray-500">Maschinenzeit</span>
+                            <span className="text-gray-800 font-medium text-right">{bt.maschinenzeit_h} h</span>
+                          </>
+                        )}
+                        {bt.programmierzeit_h !== undefined && (
+                          <>
+                            <span className="text-gray-500">Programmierzeit</span>
+                            <span className="text-gray-800 font-medium text-right">{bt.programmierzeit_h} h</span>
+                          </>
+                        )}
+                        {bt.gesamtzeit_h !== undefined && (
+                          <>
+                            <span className="text-gray-500">Gesamtzeit</span>
+                            <span className="text-gray-800 font-medium text-right">{bt.gesamtzeit_h} h</span>
+                          </>
+                        )}
+                        <span className="text-gray-500 border-t border-gray-200 pt-1">Stückpreis</span>
+                        <span className="text-gray-800 font-semibold text-right border-t border-gray-200 pt-1">{formatEur(bt.stueckpreis || 0)}</span>
+                        {bt.gesamtpreis !== undefined && (
+                          <>
+                            <span className="text-gray-500">Gesamtpreis</span>
+                            <span className="text-indigo-700 font-bold text-right">{formatEur(bt.gesamtpreis)}</span>
+                          </>
+                        )}
+                      </div>
+                      {bt.berechnung && (
+                        <details className="mt-2">
+                          <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">Berechnungsdetails</summary>
+                          <p className="text-xs text-gray-500 mt-1 whitespace-pre-wrap leading-relaxed">{bt.berechnung}</p>
+                        </details>
+                      )}
+                    </div>
+                  ))}
+
+                  {/* Gesamtpreis */}
+                  {kiErgebnis.gesamtpreis !== undefined && (
+                    <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 flex items-center justify-between">
+                      <span className="text-sm font-semibold text-indigo-800">Gesamtpreis</span>
+                      <span className="text-lg font-bold text-indigo-700">{formatEur(kiErgebnis.gesamtpreis)}</span>
+                    </div>
+                  )}
+
+                  {/* Speichern-Button */}
+                  <button
+                    onClick={handleSpeichern}
+                    className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2.5 px-4 rounded-lg transition-colors text-sm flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                    </svg>
+                    Kalkulation speichern
+                  </button>
+
+                  {gespeichert && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-2 text-center">
+                      <p className="text-xs text-green-700 font-medium">Erfolgreich gespeichert!</p>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>

@@ -1,6 +1,8 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const admin = require("firebase-admin");
+const https = require("https");
+const http = require("http");
 
 admin.initializeApp();
 
@@ -101,6 +103,155 @@ exports.testGemini = onCall(
     } catch (err) {
       console.error("Gemini API Fehler:", err.message);
       throw new HttpsError("internal", "KI-Anfrage fehlgeschlagen.");
+    }
+  }
+);
+
+// ─── Hilfsfunktion: URL → Buffer ─────────────────────────────────────────────
+function fetchBuffer(url, maxBytes = 10 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith("https") ? https : http;
+    client.get(url, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return fetchBuffer(res.headers.location, maxBytes).then(resolve, reject);
+      }
+      if (res.statusCode !== 200) {
+        return reject(new Error(`HTTP ${res.statusCode}`));
+      }
+      const chunks = [];
+      let size = 0;
+      res.on("data", (chunk) => {
+        size += chunk.length;
+        if (size > maxBytes) { res.destroy(); reject(new Error("Datei zu gross")); }
+        chunks.push(chunk);
+      });
+      res.on("end", () => resolve(Buffer.concat(chunks)));
+      res.on("error", reject);
+    }).on("error", reject);
+  });
+}
+
+// ─── kalkuliereTeile ─────────────────────────────────────────────────────────
+exports.kalkuliereTeile = onCall(
+  {
+    region: "europe-west1",
+    enforceAppCheck: true,
+    secrets: ["CNC_CALC"],
+    timeoutSeconds: 120,
+    memory: "512MiB",
+  },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Nicht eingeloggt.");
+
+    const rolle = await getRole(request.auth.uid);
+    if (rolle !== "admin" && rolle !== "user") {
+      throw new HttpsError("permission-denied", "Zugriff verweigert.");
+    }
+
+    const { prompt, imageUrls, pdfUrls } = request.data || {};
+
+    // Prompt validieren
+    if (!prompt || typeof prompt !== "string" || prompt.trim().length < 10) {
+      throw new HttpsError("invalid-argument", "Prompt ist zu kurz oder ungültig.");
+    }
+    if (prompt.length > 50000) {
+      throw new HttpsError("invalid-argument", "Prompt ist zu lang (max 50.000 Zeichen).");
+    }
+
+    // URLs validieren (nur Firebase Storage URLs erlaubt)
+    const validateUrls = (urls, label) => {
+      if (!urls) return [];
+      if (!Array.isArray(urls) || urls.length > 5) {
+        throw new HttpsError("invalid-argument", `${label}: max 5 URLs.`);
+      }
+      for (const u of urls) {
+        if (typeof u !== "string" || !u.startsWith("https://firebasestorage.googleapis.com/")) {
+          throw new HttpsError("invalid-argument", `${label}: Ungültige URL.`);
+        }
+      }
+      return urls;
+    };
+
+    const validImageUrls = validateUrls(imageUrls, "Bilder");
+    const validPdfUrls = validateUrls(pdfUrls, "PDFs");
+
+    const apiKey = process.env.CNC_CALC;
+    if (!apiKey) throw new HttpsError("internal", "Konfigurationsfehler.");
+
+    try {
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+      // Multimodale Parts aufbauen
+      const parts = [{ text: prompt.trim() }];
+
+      // Bilder laden und als inline_data anhängen
+      for (const url of validImageUrls) {
+        try {
+          const buf = await fetchBuffer(url);
+          parts.push({
+            inlineData: {
+              mimeType: "image/png",
+              data: buf.toString("base64"),
+            },
+          });
+        } catch (err) {
+          console.warn("Bild konnte nicht geladen werden:", err.message);
+        }
+      }
+
+      // PDFs laden und als inline_data anhängen
+      for (const url of validPdfUrls) {
+        try {
+          const buf = await fetchBuffer(url);
+          parts.push({
+            inlineData: {
+              mimeType: "application/pdf",
+              data: buf.toString("base64"),
+            },
+          });
+        } catch (err) {
+          console.warn("PDF konnte nicht geladen werden:", err.message);
+        }
+      }
+
+      const result = await model.generateContent({ contents: [{ role: "user", parts }] });
+      const text = result.response.text();
+
+      // JSON aus der Antwort extrahieren
+      let parsed = null;
+      try {
+        // Versuche direkt JSON zu parsen
+        parsed = JSON.parse(text);
+      } catch {
+        // Versuche JSON aus Markdown-Codeblock zu extrahieren
+        const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (match) {
+          try { parsed = JSON.parse(match[1].trim()); } catch { /* Fallback: Rohtext */ }
+        }
+      }
+
+      console.log(JSON.stringify({
+        event: "kalkuliereTeile_call",
+        uid: request.auth.uid,
+        rolle,
+        promptLength: prompt.length,
+        imageCount: validImageUrls.length,
+        pdfCount: validPdfUrls.length,
+        parsedOk: !!parsed,
+        timestamp: new Date().toISOString(),
+      }));
+
+      return {
+        success: true,
+        ergebnis: parsed,
+        rohtext: parsed ? null : text,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+      console.error("Gemini Kalkulation Fehler:", err.message);
+      throw new HttpsError("internal", "KI-Kalkulation fehlgeschlagen.");
     }
   }
 );
