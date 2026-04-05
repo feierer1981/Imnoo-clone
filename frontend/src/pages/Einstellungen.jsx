@@ -107,11 +107,12 @@ function WorkflowForm({ initial, onSave, onCancel }) {
         options={[
           { value: 'fraesen', label: 'Fräsen', icon: '⚙️' },
           { value: 'drehen', label: 'Drehen', icon: '🔄' },
+          { value: 'fraesen_drehen', label: 'Fräsen + Drehen', icon: '⚙️🔄' },
         ]}
       />
 
       {/* Werkzeuge – Fräsen */}
-      {wf.maschinentyp === 'fraesen' && (
+      {(wf.maschinentyp === 'fraesen' || wf.maschinentyp === 'fraesen_drehen') && (
         <div className="space-y-4 pl-4 border-l-4 border-indigo-100 ml-1">
           <p className="text-xs font-semibold text-indigo-500 uppercase tracking-wider">Werkzeuge beim Fräsen</p>
           <RadioGroup
@@ -136,7 +137,7 @@ function WorkflowForm({ initial, onSave, onCancel }) {
       )}
 
       {/* Werkzeuge – Drehen */}
-      {wf.maschinentyp === 'drehen' && (
+      {(wf.maschinentyp === 'drehen' || wf.maschinentyp === 'fraesen_drehen') && (
         <div className="space-y-4 pl-4 border-l-4 border-indigo-100 ml-1">
           <p className="text-xs font-semibold text-indigo-500 uppercase tracking-wider">Werkzeuge beim Drehen</p>
           <RadioGroup
@@ -253,7 +254,7 @@ function WorkflowForm({ initial, onSave, onCancel }) {
 
 // ─── WorkflowsTab ─────────────────────────────────────────────────────────────
 function WorkflowsTab({ workflows, loading, editingWorkflow, setEditingWorkflow, deletingId, setDeletingId, onSave, onDelete }) {
-  const maschinenLabel = { fraesen: 'Fräsen ⚙️', drehen: 'Drehen 🔄' };
+  const maschinenLabel = { fraesen: 'Fräsen ⚙️', drehen: 'Drehen 🔄', fraesen_drehen: 'Fräsen + Drehen ⚙️🔄' };
   const fertigungLabel = {
     einzel: 'Einzelfertigung',
     einzel_wiederkehrend: 'Einzel (wiederkehrend)',
@@ -345,10 +346,10 @@ function WorkflowsTab({ workflows, loading, editingWorkflow, setEditingWorkflow,
                   {wf.ncProgramm && (
                     <span>NC-Programm: <strong className="text-gray-700">{ncLabel[wf.ncProgramm]}</strong></span>
                   )}
-                  {wf.maschinentyp === 'fraesen' && wf.fraeswerkzeug && (
+                  {(wf.maschinentyp === 'fraesen' || wf.maschinentyp === 'fraesen_drehen') && wf.fraeswerkzeug && (
                     <span>Fräser: <strong className="text-gray-700">{wf.fraeswerkzeug.toUpperCase()}</strong></span>
                   )}
-                  {wf.maschinentyp === 'drehen' && wf.drehwerkzeug && (
+                  {(wf.maschinentyp === 'drehen' || wf.maschinentyp === 'fraesen_drehen') && wf.drehwerkzeug && (
                     <span>Drehwerkzeug: <strong className="text-gray-700">{wf.drehwerkzeug.toUpperCase()}</strong></span>
                   )}
                 </div>
