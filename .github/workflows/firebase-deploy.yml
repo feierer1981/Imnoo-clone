@@ -98,134 +98,25 @@ jobs:
           print(f'Storage Rules deployed: {st_ruleset}')
           PYEOF
 
+      - name: Google Auth einrichten
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
       - name: Cloud Functions Abhängigkeiten installieren
         run: npm ci
         working-directory: functions
 
-      - name: Cloud Functions deployen (REST API)
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          PROJECT_ID: cnc-calc-9b89b
-        run: |
-          python3 << 'PYEOF'
-          import json, os, sys, zipfile, io, time
-          import requests
-          from google.oauth2 import service_account
-          from google.auth.transport.requests import Request
-
-          sa_info = json.loads(os.environ['FIREBASE_SERVICE_ACCOUNT'])
-          project = os.environ['PROJECT_ID']
-          region = 'europe-west1'
-          function_name = 'testGemini'
-
-          credentials = service_account.Credentials.from_service_account_info(
-              sa_info,
-              scopes=['https://www.googleapis.com/auth/cloud-platform']
-          )
-          credentials.refresh(Request())
-          headers = {
-              'Authorization': f'Bearer {credentials.token}',
-              'Content-Type': 'application/json'
-          }
-
-          # --- Zip the functions directory ---
-          zip_buffer = io.BytesIO()
-          with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-              import pathlib
-              func_dir = pathlib.Path('functions')
-              for f in func_dir.rglob('*'):
-                  if f.is_file() and 'node_modules' not in f.parts:
-                      zf.write(f, f.relative_to(func_dir))
-              # Include node_modules
-              for f in func_dir.rglob('node_modules/**/*'):
-                  if f.is_file():
-                      zf.write(f, f.relative_to(func_dir))
-          zip_buffer.seek(0)
-          zip_bytes = zip_buffer.read()
-
-          # --- Upload source to Cloud Storage ---
-          upload_url = f'https://cloudfunctions.googleapis.com/v2/projects/{project}/locations/{region}/functions:generateUploadUrl'
-          resp = requests.post(upload_url, headers=headers, json={})
-          if not resp.ok:
-              print(f'Upload URL Fehler: {resp.status_code} {resp.text}', file=sys.stderr)
-              sys.exit(1)
-          storage_url = resp.json()['uploadUrl']
-          storage_source = resp.json()['storageSource']
-
-          resp = requests.put(storage_url, headers={
-              'Content-Type': 'application/zip'
-          }, data=zip_bytes)
-          if not resp.ok:
-              print(f'Upload Fehler: {resp.status_code} {resp.text}', file=sys.stderr)
-              sys.exit(1)
-          print(f'Source uploaded ({len(zip_bytes)} bytes)')
-
-          # --- Create or update Cloud Function (v2) ---
-          full_name = f'projects/{project}/locations/{region}/functions/{function_name}'
-          function_body = {
-              'name': full_name,
-              'environment': 'GEN_2',
-              'buildConfig': {
-                  'runtime': 'nodejs20',
-                  'entryPoint': function_name,
-                  'source': {
-                      'storageSource': storage_source
-                  }
-              },
-              'serviceConfig': {
-                  'availableMemory': '256Mi',
-                  'timeoutSeconds': 60,
-                  'maxInstanceCount': 10,
-                  'secretEnvironmentVariables': [{
-                      'key': 'CNC_CALC',
-                      'projectId': project,
-                      'secret': 'CNC-CALC',
-                      'version': 'latest'
-                  }]
-              }
-          }
-
-          # Try PATCH first (update), then POST (create)
-          base = f'https://cloudfunctions.googleapis.com/v2'
-          resp = requests.patch(
-              f'{base}/{full_name}',
-              headers=headers,
-              json=function_body,
-              params={'updateMask': 'buildConfig,serviceConfig'}
-          )
-          if resp.status_code == 404:
-              print('Function not found, creating new...')
-              resp = requests.post(
-                  f'{base}/projects/{project}/locations/{region}/functions',
-                  headers=headers,
-                  json=function_body,
-                  params={'functionId': function_name}
-              )
-          if not resp.ok:
-              print(f'Function deploy Fehler: {resp.status_code} {resp.text}', file=sys.stderr)
-              sys.exit(1)
-
-          operation = resp.json()
-          op_name = operation.get('name', '')
-          print(f'Deploy gestartet: {op_name}')
-
-          # Wait for operation to complete
-          for i in range(60):
-              time.sleep(10)
-              resp = requests.get(f'{base}/{op_name}', headers=headers)
-              if resp.ok:
-                  op = resp.json()
-                  if op.get('done'):
-                      if 'error' in op:
-                          print(f'Deploy fehlgeschlagen: {op["error"]}', file=sys.stderr)
-                          sys.exit(1)
-                      print(f'Cloud Function "{function_name}" erfolgreich deployed!')
-                      break
-              print(f'  Warte auf Deployment... ({(i+1)*10}s)')
-          else:
-              print('Timeout beim Warten auf Deployment', file=sys.stderr)
-              sys.exit(1)
-          PYEOF
+      - name: Cloud Functions deployen
+        uses: google-github-actions/deploy-cloud-functions@v3
+        with:
+          name: testGemini
+          runtime: nodejs20
+          region: europe-west1
+          source_dir: functions
+          project_id: cnc-calc-9b89b
+          secrets: |
+            CNC_CALC=CNC-CALC:latest
 
       - name: Firebase Hosting deployen
         uses: FirebaseExtended/action-hosting-deploy@v0
