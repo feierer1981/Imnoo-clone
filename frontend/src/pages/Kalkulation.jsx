@@ -39,15 +39,18 @@ function makeDefaultItem(overrides = {}) {
     id: Date.now() + Math.random(),
     name: '',
     beschreibung: '',
-    material: materialien[0],
+    material: '',
     laenge: '',
     breite: '',
     hoehe: '',
     stueckzahl: 1,
-    toleranz: toleranzen[0],
-    oberflaeche: oberflaechen[0],
+    toleranz: '',
+    oberflaeche: '',
     vorschauUrl: null,
     notiz: '',
+    stpUrl: null,
+    pdfUrl: null,
+    analyse: null,
     ...overrides,
   };
 }
@@ -92,6 +95,9 @@ function BibliothekModal({ uid, onAdd, onClose }) {
       hoehe: String(b.analyse?.abmessungen?.hoehe || ''),
       vorschauUrl: b.vorschauUrl || null,
       notiz: b.notizInKalkulation ? (b.notiz || '') : '',
+      stpUrl: b.stpUrl || null,
+      pdfUrl: b.pdfUrl || null,
+      analyse: b.analyse || null,
       quellId: b.id,
     });
     onClose();
@@ -283,7 +289,7 @@ function NeuesBauteilModal({ onAdd, onClose }) {
         erstelltAm: serverTimestamp(),
       });
 
-      // Zur Kalkulations-Liste hinzufügen
+      // Zur Kalkulations-Liste hinzufügen (mit allen gespeicherten Daten)
       onAdd({
         name: bauteilName.trim(),
         laenge: String(analysisResult.abmessungen?.laenge || ''),
@@ -291,6 +297,9 @@ function NeuesBauteilModal({ onAdd, onClose }) {
         hoehe: String(analysisResult.abmessungen?.hoehe || ''),
         vorschauUrl,
         notiz: notizInKalkulation ? notiz.trim() : '',
+        stpUrl,
+        pdfUrl,
+        analyse: analyseData,
       });
       onClose();
     } catch (err) {
@@ -620,8 +629,9 @@ function BauteilKarte({ item, index, onChange, onRemove }) {
           <select
             value={item.material}
             onChange={(e) => onChange(index, 'material', e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            className={`w-full border rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 ${!item.material ? 'border-amber-300 text-gray-400' : 'border-gray-200'}`}
           >
+            <option value="">– von KI ermitteln –</option>
             {materialien.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         </div>
@@ -640,8 +650,9 @@ function BauteilKarte({ item, index, onChange, onRemove }) {
           <select
             value={item.toleranz}
             onChange={(e) => onChange(index, 'toleranz', e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            className={`w-full border rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 ${!item.toleranz ? 'border-amber-300 text-gray-400' : 'border-gray-200'}`}
           >
+            <option value="">– von KI ermitteln –</option>
             {toleranzen.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         </div>
@@ -650,8 +661,9 @@ function BauteilKarte({ item, index, onChange, onRemove }) {
           <select
             value={item.oberflaeche}
             onChange={(e) => onChange(index, 'oberflaeche', e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            className={`w-full border rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 ${!item.oberflaeche ? 'border-amber-300 text-gray-400' : 'border-gray-200'}`}
           >
+            <option value="">– von KI ermitteln –</option>
             {oberflaechen.map((o) => <option key={o} value={o}>{o}</option>)}
           </select>
         </div>
