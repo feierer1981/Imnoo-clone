@@ -153,8 +153,7 @@ jobs:
           storage_source = resp.json()['storageSource']
 
           resp = requests.put(storage_url, headers={
-              'Content-Type': 'application/zip',
-              'x-goog-content-length-range': '0,524288000'
+              'Content-Type': 'application/zip'
           }, data=zip_bytes)
           if not resp.ok:
               print(f'Upload Fehler: {resp.status_code} {resp.text}', file=sys.stderr)
