@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../../firebase';
+import { getAuth } from 'firebase/auth';
+
+const FUNCTION_URL = 'https://europe-west1-cnc-calc-9b89b.cloudfunctions.net/testGemini';
 
 function KiTest() {
   const [prompt, setPrompt] = useState(
@@ -15,9 +16,23 @@ function KiTest() {
     setError(null);
     setResult(null);
     try {
-      const testGemini = httpsCallable(functions, 'testGemini');
-      const response = await testGemini({ prompt });
-      setResult(response.data);
+      const auth = getAuth();
+      const user = auth.currentUser;
+      if (!user) throw new Error('Nicht eingeloggt.');
+      const idToken = await user.getIdToken();
+
+      const response = await fetch(FUNCTION_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ prompt }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      setResult(data);
     } catch (err) {
       console.error('KI-Test Fehler:', err);
       setError(err.message || 'Unbekannter Fehler');
@@ -39,7 +54,7 @@ function KiTest() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-xs text-gray-500 font-medium">Modell</p>
-          <p className="text-lg font-bold text-gray-800 mt-1">gemini-2.0-flash</p>
+          <p className="text-lg font-bold text-gray-800 mt-1">gemini-2.5-flash</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-xs text-gray-500 font-medium">Region</p>
@@ -98,15 +113,6 @@ function KiTest() {
             <div>
               <h3 className="text-red-800 font-semibold text-sm">Fehler bei der API-Anfrage</h3>
               <p className="text-red-700 text-sm mt-1">{error}</p>
-              <div className="mt-3 bg-red-100 rounded-lg p-3 text-xs text-red-800">
-                <p className="font-medium mb-1">Mögliche Ursachen:</p>
-                <ul className="list-disc list-inside space-y-0.5">
-                  <li>Cloud Function noch nicht deployed (<code>firebase deploy --only functions</code>)</li>
-                  <li>Secret "CNC-CALC" in Secret Manager nicht vorhanden oder falsche Berechtigung</li>
-                  <li>Gemini API nicht aktiviert im Google Cloud Projekt</li>
-                  <li>Falscher Modellname oder API-Key</li>
-                </ul>
-              </div>
             </div>
           </div>
         </div>
@@ -157,11 +163,11 @@ function KiTest() {
       <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
         <h3 className="text-blue-800 font-medium text-sm mb-2">Architektur</h3>
         <div className="text-xs text-blue-700 space-y-1">
-          <p>1. Frontend ruft <code>httpsCallable(functions, 'testGemini')</code> auf</p>
-          <p>2. Cloud Function (europe-west1) prüft Auth + Admin-Rolle</p>
+          <p>1. Frontend sendet POST mit Firebase ID Token (Authorization Header)</p>
+          <p>2. Cloud Function (europe-west1) verifiziert Token + Admin-Rolle</p>
           <p>3. API-Key wird aus Secret Manager ("CNC-CALC") geladen</p>
-          <p>4. Anfrage wird an <code>gemini-2.0-flash</code> gesendet</p>
-          <p>5. Antwort wird ans Frontend zurückgegeben</p>
+          <p>4. Anfrage wird an <code>gemini-2.5-flash</code> gesendet</p>
+          <p>5. Antwort wird als JSON zurückgegeben</p>
         </div>
       </div>
     </div>
