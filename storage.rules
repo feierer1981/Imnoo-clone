@@ -14,5 +14,15 @@ service firebase.storage {
       // Löschen: beim Ersetzen oder Entfernen von Bauteilen
       allow delete: if request.auth != null && request.auth.uid == userId;
     }
+
+    // Profil-Dateien (Firmenlogo): Nutzer darf nur sein eigenes Logo lesen/schreiben.
+    match /profile/{userId}/{allPaths=**} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      // Hochladen: max. 5 MB
+      allow create, update: if request.auth != null
+                            && request.auth.uid == userId
+                            && request.resource.size < 5 * 1024 * 1024;
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
   }
 }
