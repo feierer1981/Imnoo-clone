@@ -64,9 +64,10 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Prompts - nur Admin (Erstellung, Bearbeitung, Loeschung)
+    // Prompts - lesen fuer freigeschaltete Nutzer, schreiben nur Admin
     match /prompts/{promptId} {
-      allow read, write: if isAdmin();
+      allow read: if isUser() || isAdmin();
+      allow write: if isAdmin();
     }
   }
 }
