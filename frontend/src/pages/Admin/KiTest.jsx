@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { protectedFetch } from '../../protectedFetch';
-
-const FUNCTION_URL = 'https://europe-west1-cnc-calc-9b89b.cloudfunctions.net/testGemini';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../firebase';
 
 function KiTest() {
   const [prompt, setPrompt] = useState(
@@ -16,8 +15,9 @@ function KiTest() {
     setError(null);
     setResult(null);
     try {
-      const data = await protectedFetch(FUNCTION_URL, { prompt });
-      setResult(data);
+      const testGemini = httpsCallable(functions, 'testGemini');
+      const response = await testGemini({ prompt });
+      setResult(response.data);
     } catch (err) {
       console.error('KI-Test Fehler:', err);
       setError(err.message || 'Unbekannter Fehler');
@@ -46,9 +46,9 @@ function KiTest() {
           <p className="text-lg font-bold text-gray-800 mt-1">europe-west1</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <p className="text-xs text-gray-500 font-medium">Secret</p>
-          <p className="text-lg font-bold text-gray-800 mt-1">CNC-CALC</p>
-          <p className="text-xs text-gray-400">Google Cloud Secret Manager</p>
+          <p className="text-xs text-gray-500 font-medium">Schutz</p>
+          <p className="text-lg font-bold text-gray-800 mt-1">App Check + Auth</p>
+          <p className="text-xs text-gray-400">reCAPTCHA Enterprise</p>
         </div>
       </div>
 
@@ -146,13 +146,12 @@ function KiTest() {
 
       {/* Info-Box */}
       <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h3 className="text-blue-800 font-medium text-sm mb-2">Architektur</h3>
+        <h3 className="text-blue-800 font-medium text-sm mb-2">Sicherheitsarchitektur</h3>
         <div className="text-xs text-blue-700 space-y-1">
-          <p>1. Frontend sendet POST mit Firebase ID Token (Authorization Header)</p>
-          <p>2. Cloud Function (europe-west1) verifiziert Token + Admin-Rolle</p>
-          <p>3. API-Key wird aus Secret Manager ("CNC-CALC") geladen</p>
-          <p>4. Anfrage wird an <code>gemini-2.5-flash</code> gesendet</p>
-          <p>5. Antwort wird als JSON zurückgegeben</p>
+          <p>1. App Check (reCAPTCHA Enterprise) – blockiert Bots & direkte API-Aufrufe</p>
+          <p>2. Firebase Auth (ID Token) – nur eingeloggte Nutzer</p>
+          <p>3. Custom Claims – nur Rollen admin/user</p>
+          <p>4. Anfrage an <code>gemini-2.5-flash</code> in europe-west1</p>
         </div>
       </div>
     </div>
