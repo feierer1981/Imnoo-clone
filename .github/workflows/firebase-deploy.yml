@@ -116,7 +116,7 @@ jobs:
           source_dir: functions
           project_id: cnc-calc-9b89b
           secrets: |
-            CNC_CALC=CNC-CALC:latest
+            CNC_CALC=projects/cnc-calc-9b89b/secrets/CNC-CALC/versions/latest
 
       - name: Firebase Hosting deployen
         uses: FirebaseExtended/action-hosting-deploy@v0
