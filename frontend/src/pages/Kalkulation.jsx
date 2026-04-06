@@ -748,6 +748,8 @@ function Kalkulation() {
   const [kiErgebnis, setKiErgebnis] = useState(null);
   const [kiError, setKiError] = useState(null);
   const [isTestAccount, setIsTestAccount] = useState(false);
+  const [zeitspanvolumen, setZeitspanvolumen] = useState(0);
+  const [kiAnpassung, setKiAnpassung] = useState(0);
   const [promptVorschau, setPromptVorschau] = useState(null); // { prompt, imageUrls, pdfUrls } – wartet auf Bestätigung
 
   // Bauteile-Liste im localStorage speichern
@@ -771,7 +773,10 @@ function Kalkulation() {
           getDoc(doc(db, 'users', user.uid)),
         ]);
         setWorkflows(workflowSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        setIsTestAccount(!!userSnap.data()?.testAccount);
+        const userData = userSnap.data() || {};
+        setIsTestAccount(!!userData.testAccount);
+        setZeitspanvolumen(parseFloat(userData.zeitspanvolumen) || 0);
+        setKiAnpassung(parseInt(userData.kiAnpassung) ?? 0);
       } catch (err) {
         console.error(err);
       } finally {
@@ -890,6 +895,19 @@ function Kalkulation() {
       });
       fullPrompt += '\n';
 
+      // Zeitspanvolumen-Info
+      if (zeitspanvolumen > 0) {
+        fullPrompt += '=== BERECHNUNGSVORGABEN ===\n';
+        fullPrompt += `Zeitspanvolumen (Q): ${zeitspanvolumen} cm³/min\n`;
+        fullPrompt += `Erlaubte KI-Anpassung: ±${kiAnpassung}%\n`;
+        if (kiAnpassung === 0) {
+          fullPrompt += 'WICHTIG: Du darfst die vorberechnete Maschinenzeit NICHT verändern. Übernimm sie exakt.\n';
+        } else {
+          fullPrompt += `Du darfst die vorberechnete Maschinenzeit um maximal ±${kiAnpassung}% anpassen, basierend auf Toleranzen, Oberflächengüte, Materialbearbeitbarkeit und Bauteilkomplexität. Begründe jede Anpassung.\n`;
+        }
+        fullPrompt += '\n';
+      }
+
       // Bauteil-Daten
       const imageUrls = [];
       const pdfUrls = [];
@@ -906,16 +924,39 @@ function Kalkulation() {
         }
         if (item.notiz) fullPrompt += `Hinweis/Notiz: ${item.notiz}\n`;
 
-        // 3D-Analyse anhängen
+        // 3D-Analyse anhängen + Volumenberechnung
         if (item.analyse) {
           fullPrompt += `\n3D-Analyse (OCCT):\n`;
           const a = item.analyse;
-          if (a.volumen !== undefined) fullPrompt += `  Volumen: ${a.volumen} mm³\n`;
+          const bauteilVolumen = a.volumen || 0; // mm³
+          if (bauteilVolumen > 0) fullPrompt += `  Bauteil-Volumen: ${bauteilVolumen.toFixed(1)} mm³ (${(bauteilVolumen / 1000).toFixed(2)} cm³)\n`;
           if (a.oberflaeche !== undefined) fullPrompt += `  Oberfläche: ${a.oberflaeche} mm²\n`;
+
+          // Rohteil-Volumen aus Bounding Box
           if (a.boundingBox) {
             const bb = a.boundingBox;
-            fullPrompt += `  Bounding-Box: ${bb.xSize?.toFixed(1)}×${bb.ySize?.toFixed(1)}×${bb.zSize?.toFixed(1)} mm\n`;
+            const bbX = bb.xSize || 0;
+            const bbY = bb.ySize || 0;
+            const bbZ = bb.zSize || 0;
+            const rohteilVolumen = bbX * bbY * bbZ; // mm³
+            fullPrompt += `  Bounding-Box: ${bbX.toFixed(1)}×${bbY.toFixed(1)}×${bbZ.toFixed(1)} mm\n`;
+            fullPrompt += `  Rohteil-Volumen (Bounding Box): ${rohteilVolumen.toFixed(1)} mm³ (${(rohteilVolumen / 1000).toFixed(2)} cm³)\n`;
+
+            if (bauteilVolumen > 0) {
+              const zerspanVolumen = rohteilVolumen - bauteilVolumen; // mm³
+              const zerspanCm3 = zerspanVolumen / 1000;
+              fullPrompt += `  Zerspanvolumen (abzutragen): ${zerspanVolumen.toFixed(1)} mm³ (${zerspanCm3.toFixed(2)} cm³)\n`;
+
+              // Maschinenzeit berechnen wenn Zeitspanvolumen vorhanden
+              if (zeitspanvolumen > 0 && zerspanCm3 > 0) {
+                const maschinenzeitMin = zerspanCm3 / zeitspanvolumen;
+                const maschinenzeitH = maschinenzeitMin / 60;
+                fullPrompt += `\n  >>> VORBERECHNETE MASCHINENZEIT: ${maschinenzeitMin.toFixed(1)} min (${maschinenzeitH.toFixed(2)} h) <<<\n`;
+                fullPrompt += `  (Berechnung: ${zerspanCm3.toFixed(2)} cm³ ÷ ${zeitspanvolumen} cm³/min = ${maschinenzeitMin.toFixed(1)} min)\n`;
+              }
+            }
           }
+
           if (a.schwerpunkt) {
             const s = a.schwerpunkt;
             fullPrompt += `  Schwerpunkt: (${s.x?.toFixed(1)}, ${s.y?.toFixed(1)}, ${s.z?.toFixed(1)})\n`;
