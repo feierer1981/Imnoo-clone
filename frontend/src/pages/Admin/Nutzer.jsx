@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { collection, getDocs, updateDoc, doc, query, orderBy } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../../firebase';
@@ -18,6 +18,7 @@ function Nutzer() {
   const [error, setError] = useState(null);
   const [updating, setUpdating] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
+  const [expandedUser, setExpandedUser] = useState(null);
 
   useEffect(() => {
     loadNutzer();
@@ -51,6 +52,23 @@ function Nutzer() {
       setTimeout(() => setSuccessMsg(null), 3000);
     } catch (err) {
       setError('Testaccount konnte nicht geändert werden: ' + err.message);
+    } finally {
+      setUpdating(null);
+    }
+  };
+
+  const updateUserField = async (uid, field, value) => {
+    setUpdating(uid + '_' + field);
+    setError(null);
+    try {
+      await updateDoc(doc(db, 'users', uid), { [field]: value });
+      setNutzer((prev) =>
+        prev.map((n) => (n.id === uid ? { ...n, [field]: value } : n))
+      );
+      setSuccessMsg(`${field === 'zeitspanvolumen' ? 'Zeitspanvolumen' : 'KI-Anpassung'} gespeichert.`);
+      setTimeout(() => setSuccessMsg(null), 3000);
+    } catch (err) {
+      setError('Wert konnte nicht gespeichert werden: ' + err.message);
     } finally {
       setUpdating(null);
     }
@@ -172,59 +190,145 @@ function Nutzer() {
             </thead>
             <tbody className="divide-y divide-gray-50">
               {nutzer.map((n) => (
-                <tr key={n.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4 font-medium text-gray-800">{n.name || '-'}</td>
-                  <td className="px-6 py-4 text-gray-600">{n.email}</td>
-                  <td className="px-6 py-4 text-gray-400">{formatDate(n.erstelltAm)}</td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-block text-xs font-medium px-2.5 py-1 rounded-full ${rolleBadge[n.rolle] || 'bg-gray-100 text-gray-600'}`}>
-                      {rolleKlartext[n.rolle] || n.rolle}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    {n.id === currentUser?.uid ? (
-                      <span className="text-xs text-gray-400">–</span>
-                    ) : (
-                      <button
-                        onClick={() => toggleTestAccount(n.id, !!n.testAccount)}
-                        disabled={updating === n.id + '_test'}
-                        title={n.testAccount ? 'Testaccount deaktivieren' : 'Testaccount aktivieren'}
-                        className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                          n.testAccount ? 'bg-amber-400' : 'bg-gray-200'
-                        } disabled:opacity-50`}
-                      >
-                        <span
-                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                            n.testAccount ? 'translate-x-4' : 'translate-x-0'
-                          }`}
-                        />
-                      </button>
-                    )}
-                  </td>
-                  <td className="px-6 py-4">
-                    {n.id === currentUser?.uid ? (
-                      <span className="text-xs text-gray-400 italic">Eigenes Konto</span>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <select
-                          defaultValue={n.rolle}
-                          disabled={updating === n.id}
-                          onChange={(e) => updateRolle(n.id, e.target.value)}
-                          className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-50"
+                <React.Fragment key={n.id}>
+                  <tr className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4 font-medium text-gray-800">{n.name || '-'}</td>
+                    <td className="px-6 py-4 text-gray-600">{n.email}</td>
+                    <td className="px-6 py-4 text-gray-400">{formatDate(n.erstelltAm)}</td>
+                    <td className="px-6 py-4">
+                      <span className={`inline-block text-xs font-medium px-2.5 py-1 rounded-full ${rolleBadge[n.rolle] || 'bg-gray-100 text-gray-600'}`}>
+                        {rolleKlartext[n.rolle] || n.rolle}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      {n.id === currentUser?.uid ? (
+                        <span className="text-xs text-gray-400">–</span>
+                      ) : (
+                        <button
+                          onClick={() => toggleTestAccount(n.id, !!n.testAccount)}
+                          disabled={updating === n.id + '_test'}
+                          title={n.testAccount ? 'Testaccount deaktivieren' : 'Testaccount aktivieren'}
+                          className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                            n.testAccount ? 'bg-amber-400' : 'bg-gray-200'
+                          } disabled:opacity-50`}
                         >
-                          {ROLLEN.map((r) => (
-                            <option key={r} value={r}>
-                              {rolleKlartext[r]}
-                            </option>
-                          ))}
-                        </select>
-                        {updating === n.id && (
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600"></div>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                </tr>
+                          <span
+                            className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                              n.testAccount ? 'translate-x-4' : 'translate-x-0'
+                            }`}
+                          />
+                        </button>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      {n.id === currentUser?.uid ? (
+                        <span className="text-xs text-gray-400 italic">Eigenes Konto</span>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <select
+                            defaultValue={n.rolle}
+                            disabled={updating === n.id}
+                            onChange={(e) => updateRolle(n.id, e.target.value)}
+                            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-50"
+                          >
+                            {ROLLEN.map((r) => (
+                              <option key={r} value={r}>
+                                {rolleKlartext[r]}
+                              </option>
+                            ))}
+                          </select>
+                          {updating === n.id && (
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600"></div>
+                          )}
+                          <button
+                            onClick={() => setExpandedUser(expandedUser === n.id ? null : n.id)}
+                            className="text-xs text-indigo-600 hover:text-indigo-800 font-medium ml-2"
+                            title="KI-Einstellungen"
+                          >
+                            <svg className={`w-4 h-4 transition-transform ${expandedUser === n.id ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                  {expandedUser === n.id && n.id !== currentUser?.uid && (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-4 bg-indigo-50/50">
+                        <div className="flex flex-wrap gap-6 items-end">
+                          {/* Zeitspanvolumen */}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">
+                              Zeitspanvolumen (cm³/min)
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.1"
+                                defaultValue={n.zeitspanvolumen || ''}
+                                placeholder="z.B. 25"
+                                onBlur={(e) => {
+                                  const val = parseFloat(e.target.value);
+                                  if (!isNaN(val) && val >= 0 && val !== (n.zeitspanvolumen || 0)) {
+                                    updateUserField(n.id, 'zeitspanvolumen', val);
+                                  }
+                                }}
+                                className="w-28 text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                              />
+                              {updating === n.id + '_zeitspanvolumen' && (
+                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-indigo-600"></div>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-gray-400 mt-0.5">Materialabtrag pro Minute</p>
+                          </div>
+                          {/* KI-Anpassung */}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">
+                              KI-Anpassung (± %)
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                min="0"
+                                max="200"
+                                step="5"
+                                defaultValue={n.kiAnpassung ?? ''}
+                                placeholder="z.B. 30"
+                                onBlur={(e) => {
+                                  const val = parseInt(e.target.value);
+                                  if (!isNaN(val) && val >= 0 && val <= 200 && val !== (n.kiAnpassung ?? -1)) {
+                                    updateUserField(n.id, 'kiAnpassung', val);
+                                  }
+                                }}
+                                className="w-28 text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                              />
+                              <span className="text-xs text-gray-500">%</span>
+                              {updating === n.id + '_kiAnpassung' && (
+                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-indigo-600"></div>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-gray-400 mt-0.5">0% = keine Anpassung, max. 200%</p>
+                          </div>
+                          {/* Aktuelle Werte Anzeige */}
+                          <div className="text-xs text-gray-500 ml-auto">
+                            {n.zeitspanvolumen ? (
+                              <span className="inline-flex items-center gap-1 bg-white border border-gray-200 rounded px-2 py-1 mr-2">
+                                Q: <strong className="text-gray-700">{n.zeitspanvolumen} cm³/min</strong>
+                              </span>
+                            ) : null}
+                            {n.kiAnpassung !== undefined && n.kiAnpassung !== null ? (
+                              <span className="inline-flex items-center gap-1 bg-white border border-gray-200 rounded px-2 py-1">
+                                ±: <strong className="text-gray-700">{n.kiAnpassung}%</strong>
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>
