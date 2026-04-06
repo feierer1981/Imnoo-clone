@@ -928,18 +928,18 @@ function Kalkulation() {
         if (item.analyse) {
           fullPrompt += `\n3D-Analyse (OCCT):\n`;
           const a = item.analyse;
-          const bauteilVolumen = a.volumen || 0; // mm³
-          if (bauteilVolumen > 0) fullPrompt += `  Bauteil-Volumen: ${bauteilVolumen.toFixed(1)} mm³ (${(bauteilVolumen / 1000).toFixed(2)} cm³)\n`;
-          if (a.oberflaeche !== undefined) fullPrompt += `  Oberfläche: ${a.oberflaeche} mm²\n`;
+          const bauteilVolumen = a.volumenMm3 || 0; // mm³
+          const bb = a.abmessungen || {};
+          const bbL = bb.laenge || 0;
+          const bbB = bb.breite || 0;
+          const bbH = bb.hoehe || 0;
 
-          // Rohteil-Volumen aus Bounding Box
-          if (a.boundingBox) {
-            const bb = a.boundingBox;
-            const bbX = bb.xSize || 0;
-            const bbY = bb.ySize || 0;
-            const bbZ = bb.zSize || 0;
-            const rohteilVolumen = bbX * bbY * bbZ; // mm³
-            fullPrompt += `  Bounding-Box: ${bbX.toFixed(1)}×${bbY.toFixed(1)}×${bbZ.toFixed(1)} mm\n`;
+          if (bauteilVolumen > 0) fullPrompt += `  Bauteil-Volumen: ${bauteilVolumen.toFixed(1)} mm³ (${(bauteilVolumen / 1000).toFixed(2)} cm³)\n`;
+          if (a.oberflaecheMm2 !== undefined) fullPrompt += `  Oberfläche: ${a.oberflaecheMm2} mm²\n`;
+
+          if (bbL && bbB && bbH) {
+            const rohteilVolumen = bbL * bbB * bbH; // mm³
+            fullPrompt += `  Bounding-Box: ${bbL.toFixed(1)}×${bbB.toFixed(1)}×${bbH.toFixed(1)} mm\n`;
             fullPrompt += `  Rohteil-Volumen (Bounding Box): ${rohteilVolumen.toFixed(1)} mm³ (${(rohteilVolumen / 1000).toFixed(2)} cm³)\n`;
 
             if (bauteilVolumen > 0) {
@@ -947,7 +947,6 @@ function Kalkulation() {
               const zerspanCm3 = zerspanVolumen / 1000;
               fullPrompt += `  Zerspanvolumen (abzutragen): ${zerspanVolumen.toFixed(1)} mm³ (${zerspanCm3.toFixed(2)} cm³)\n`;
 
-              // Maschinenzeit berechnen wenn Zeitspanvolumen vorhanden
               if (zeitspanvolumen > 0 && zerspanCm3 > 0) {
                 const maschinenzeitMin = zerspanCm3 / zeitspanvolumen;
                 const maschinenzeitH = maschinenzeitMin / 60;
@@ -957,14 +956,15 @@ function Kalkulation() {
             }
           }
 
-          if (a.schwerpunkt) {
-            const s = a.schwerpunkt;
-            fullPrompt += `  Schwerpunkt: (${s.x?.toFixed(1)}, ${s.y?.toFixed(1)}, ${s.z?.toFixed(1)})\n`;
-          }
-          if (a.faces !== undefined) fullPrompt += `  Flächen: ${a.faces}\n`;
-          if (a.edges !== undefined) fullPrompt += `  Kanten: ${a.edges}\n`;
-          if (a.shells !== undefined) fullPrompt += `  Schalen: ${a.shells}\n`;
-          if (a.solids !== undefined) fullPrompt += `  Körper: ${a.solids}\n`;
+          // Features
+          if (a.bohrungen?.length) fullPrompt += `  Bohrungen: ${a.bohrungen.length}\n`;
+          if (a.gewindeBohrungen?.length) fullPrompt += `  Gewinde: ${a.gewindeBohrungen.length}\n`;
+          if (a.fasen?.length) fullPrompt += `  Fasen: ${a.fasen.length}\n`;
+          if (a.senkungen?.length) fullPrompt += `  Senkungen: ${a.senkungen.length}\n`;
+          if (a.radien?.length) fullPrompt += `  Radien: ${a.radien.length}\n`;
+          if (a.minInnenradius) fullPrompt += `  Min. Innenradius: ${a.minInnenradius.toFixed(2)} mm\n`;
+          if (a.features?.length) fullPrompt += `  Features: ${a.features.join(', ')}\n`;
+          if (a.analyseModus) fullPrompt += `  Analysemodus: ${a.analyseModus}\n`;
         }
 
         // Bild + PDF URLs sammeln
