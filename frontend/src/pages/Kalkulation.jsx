@@ -911,6 +911,7 @@ function Kalkulation() {
       // Bauteil-Daten
       const imageUrls = [];
       const pdfUrls = [];
+      const stpUrls = [];
 
       fullPrompt += '=== BAUTEILE ZUR KALKULATION ===\n\n';
       bauteileList.forEach((item, i) => {
@@ -967,9 +968,10 @@ function Kalkulation() {
           if (a.analyseModus) fullPrompt += `  Analysemodus: ${a.analyseModus}\n`;
         }
 
-        // Bild + PDF URLs sammeln
+        // Bild, PDF und STP URLs sammeln
         if (item.vorschauUrl) imageUrls.push(item.vorschauUrl);
         if (item.pdfUrl) pdfUrls.push(item.pdfUrl);
+        if (item.stpUrl) stpUrls.push(item.stpUrl);
 
         fullPrompt += '\n';
       });
@@ -978,13 +980,13 @@ function Kalkulation() {
 
       // 4a. Testaccount: Prompt zur Bestätigung anzeigen, noch nicht senden
       if (isTestAccount) {
-        setPromptVorschau({ prompt: fullPrompt, imageUrls, pdfUrls });
+        setPromptVorschau({ prompt: fullPrompt, imageUrls, pdfUrls, stpUrls });
         setKiLoading(false);
         return;
       }
 
       // 4b. Normaler User: direkt senden
-      await sendeAnKI(fullPrompt, imageUrls, pdfUrls);
+      await sendeAnKI(fullPrompt, imageUrls, pdfUrls, stpUrls);
     } catch (err) {
       console.error('Kalkulation Fehler:', err);
       setKiError(err.message || 'Kalkulation fehlgeschlagen.');
@@ -993,12 +995,12 @@ function Kalkulation() {
     }
   };
 
-  const sendeAnKI = async (prompt, imageUrls, pdfUrls) => {
+  const sendeAnKI = async (prompt, imageUrls, pdfUrls, stpUrls = []) => {
     setKiLoading(true);
     setKiError(null);
     try {
       const kalkuliereTeile = httpsCallable(functions, 'kalkuliereTeile');
-      const response = await kalkuliereTeile({ prompt, imageUrls, pdfUrls });
+      const response = await kalkuliereTeile({ prompt, imageUrls, pdfUrls, stpUrls });
 
       if (response.data?.success && response.data.ergebnis) {
         setKiErgebnis(response.data.ergebnis);
@@ -1360,6 +1362,11 @@ function Kalkulation() {
                   <span className="text-xs font-medium text-gray-500">PDFs: {promptVorschau.pdfUrls.length} Datei(en)</span>
                 </div>
               )}
+              {promptVorschau.stpUrls?.length > 0 && (
+                <div className="mb-3">
+                  <span className="text-xs font-medium text-gray-500">STP-Dateien: {promptVorschau.stpUrls.length} Datei(en)</span>
+                </div>
+              )}
               <pre className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed font-mono bg-gray-50 rounded-lg p-4 border border-gray-100">
                 {promptVorschau.prompt}
               </pre>
@@ -1375,9 +1382,9 @@ function Kalkulation() {
               </button>
               <button
                 onClick={async () => {
-                  const { prompt, imageUrls, pdfUrls } = promptVorschau;
+                  const { prompt, imageUrls, pdfUrls, stpUrls } = promptVorschau;
                   setPromptVorschau(null);
-                  await sendeAnKI(prompt, imageUrls, pdfUrls);
+                  await sendeAnKI(prompt, imageUrls, pdfUrls, stpUrls);
                 }}
                 className="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors flex items-center gap-2"
               >

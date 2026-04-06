@@ -148,7 +148,7 @@ exports.kalkuliereTeile = onCall(
       throw new HttpsError("permission-denied", "Zugriff verweigert.");
     }
 
-    const { prompt, imageUrls, pdfUrls } = request.data || {};
+    const { prompt, imageUrls, pdfUrls, stpUrls } = request.data || {};
 
     // Prompt validieren
     if (!prompt || typeof prompt !== "string" || prompt.trim().length < 10) {
@@ -174,6 +174,7 @@ exports.kalkuliereTeile = onCall(
 
     const validImageUrls = validateUrls(imageUrls, "Bilder");
     const validPdfUrls = validateUrls(pdfUrls, "PDFs");
+    const validStpUrls = validateUrls(stpUrls, "STP-Dateien");
 
     const apiKey = process.env.CNC_CALC;
     if (!apiKey) throw new HttpsError("internal", "Konfigurationsfehler.");
@@ -215,6 +216,21 @@ exports.kalkuliereTeile = onCall(
         }
       }
 
+      // STP-Dateien laden und als text/plain anhängen (STEP ist ASCII)
+      for (const url of validStpUrls) {
+        try {
+          const buf = await fetchBuffer(url, 5 * 1024 * 1024); // max 5 MB
+          parts.push({
+            inlineData: {
+              mimeType: "text/plain",
+              data: buf.toString("base64"),
+            },
+          });
+        } catch (err) {
+          console.warn("STP-Datei konnte nicht geladen werden:", err.message);
+        }
+      }
+
       const result = await model.generateContent({ contents: [{ role: "user", parts }] });
       const text = result.response.text();
 
@@ -237,6 +253,7 @@ exports.kalkuliereTeile = onCall(
         rolle,
         promptLength: prompt.length,
         imageCount: validImageUrls.length,
+        stpCount: validStpUrls.length,
         pdfCount: validPdfUrls.length,
         parsedOk: !!parsed,
         timestamp: new Date().toISOString(),
