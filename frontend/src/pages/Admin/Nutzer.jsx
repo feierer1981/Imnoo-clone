@@ -38,6 +38,24 @@ function Nutzer() {
     }
   };
 
+  const toggleTestAccount = async (uid, currentValue) => {
+    setUpdating(uid + '_test');
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      await updateDoc(doc(db, 'users', uid), { testAccount: !currentValue });
+      setNutzer((prev) =>
+        prev.map((n) => (n.id === uid ? { ...n, testAccount: !currentValue } : n))
+      );
+      setSuccessMsg(!currentValue ? 'Testaccount aktiviert.' : 'Testaccount deaktiviert.');
+      setTimeout(() => setSuccessMsg(null), 3000);
+    } catch (err) {
+      setError('Testaccount konnte nicht geändert werden: ' + err.message);
+    } finally {
+      setUpdating(null);
+    }
+  };
+
   const updateRolle = async (uid, newRolle) => {
     setUpdating(uid);
     setError(null);
@@ -148,6 +166,7 @@ function Nutzer() {
                 <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">E-Mail</th>
                 <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Registriert</th>
                 <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Rolle</th>
+                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Testaccount</th>
                 <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Aktion</th>
               </tr>
             </thead>
@@ -161,6 +180,26 @@ function Nutzer() {
                     <span className={`inline-block text-xs font-medium px-2.5 py-1 rounded-full ${rolleBadge[n.rolle] || 'bg-gray-100 text-gray-600'}`}>
                       {rolleKlartext[n.rolle] || n.rolle}
                     </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    {n.id === currentUser?.uid ? (
+                      <span className="text-xs text-gray-400">–</span>
+                    ) : (
+                      <button
+                        onClick={() => toggleTestAccount(n.id, !!n.testAccount)}
+                        disabled={updating === n.id + '_test'}
+                        title={n.testAccount ? 'Testaccount deaktivieren' : 'Testaccount aktivieren'}
+                        className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          n.testAccount ? 'bg-amber-400' : 'bg-gray-200'
+                        } disabled:opacity-50`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            n.testAccount ? 'translate-x-4' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     {n.id === currentUser?.uid ? (

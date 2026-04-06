@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation, Link } from 'react-router-dom';
-import { collection, query, orderBy, getDocs, addDoc, serverTimestamp, doc, where } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, addDoc, serverTimestamp, doc, getDoc, where } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { httpsCallable } from 'firebase/functions';
 import { db, storage, functions } from '../firebase';
@@ -747,6 +747,8 @@ function Kalkulation() {
   const [kiLoading, setKiLoading] = useState(false);
   const [kiErgebnis, setKiErgebnis] = useState(null);
   const [kiError, setKiError] = useState(null);
+  const [isTestAccount, setIsTestAccount] = useState(false);
+  const [promptVorschau, setPromptVorschau] = useState(null); // { prompt, imageUrls, pdfUrls } – wartet auf Bestätigung
 
   // Bauteile-Liste im localStorage speichern
   useEffect(() => {
@@ -760,19 +762,23 @@ function Kalkulation() {
     try { localStorage.setItem(workflowStorageKey, selectedWorkflowId); } catch {}
   }, [selectedWorkflowId, workflowStorageKey]);
 
-  // Workflows laden
+  // Workflows laden + testAccount-Flag prüfen
   useEffect(() => {
-    async function loadWorkflows() {
+    async function loadData() {
       try {
-        const snap = await getDocs(collection(db, 'users', user.uid, 'workflows'));
-        setWorkflows(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        const [workflowSnap, userSnap] = await Promise.all([
+          getDocs(collection(db, 'users', user.uid, 'workflows')),
+          getDoc(doc(db, 'users', user.uid)),
+        ]);
+        setWorkflows(workflowSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setIsTestAccount(!!userSnap.data()?.testAccount);
       } catch (err) {
         console.error(err);
       } finally {
         setWorkflowsLoading(false);
       }
     }
-    loadWorkflows();
+    loadData();
   }, [user.uid]);
 
   // Daten aus NeuesBauteil "In Kalkulation" Button übernehmen
@@ -929,13 +935,29 @@ function Kalkulation() {
 
       fullPrompt += `\nAntworte ausschließlich im JSON-Format wie vorgegeben.`;
 
-      // 4. Cloud Function aufrufen
+      // 4a. Testaccount: Prompt zur Bestätigung anzeigen, noch nicht senden
+      if (isTestAccount) {
+        setPromptVorschau({ prompt: fullPrompt, imageUrls, pdfUrls });
+        setKiLoading(false);
+        return;
+      }
+
+      // 4b. Normaler User: direkt senden
+      await sendeAnKI(fullPrompt, imageUrls, pdfUrls);
+    } catch (err) {
+      console.error('Kalkulation Fehler:', err);
+      setKiError(err.message || 'Kalkulation fehlgeschlagen.');
+    } finally {
+      setKiLoading(false);
+    }
+  };
+
+  const sendeAnKI = async (prompt, imageUrls, pdfUrls) => {
+    setKiLoading(true);
+    setKiError(null);
+    try {
       const kalkuliereTeile = httpsCallable(functions, 'kalkuliereTeile');
-      const response = await kalkuliereTeile({
-        prompt: fullPrompt,
-        imageUrls,
-        pdfUrls,
-      });
+      const response = await kalkuliereTeile({ prompt, imageUrls, pdfUrls });
 
       if (response.data?.success && response.data.ergebnis) {
         setKiErgebnis(response.data.ergebnis);
@@ -1249,6 +1271,80 @@ function Kalkulation() {
                   )}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Prompt-Vorschau Modal (nur Testaccounts) */}
+      {promptVorschau && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
+                  <svg className="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-gray-800">Prompt-Vorschau</h2>
+                  <p className="text-xs text-amber-600">Testaccount – bitte prüfen und bestätigen</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPromptVorschau(null)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Prompt-Inhalt */}
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {promptVorschau.imageUrls?.length > 0 && (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  <span className="text-xs font-medium text-gray-500">Bilder ({promptVorschau.imageUrls.length}):</span>
+                  {promptVorschau.imageUrls.map((url, i) => (
+                    <img key={i} src={url} alt={`Vorschau ${i + 1}`} className="h-16 rounded border border-gray-200 object-contain bg-gray-50" />
+                  ))}
+                </div>
+              )}
+              {promptVorschau.pdfUrls?.length > 0 && (
+                <div className="mb-3">
+                  <span className="text-xs font-medium text-gray-500">PDFs: {promptVorschau.pdfUrls.length} Datei(en)</span>
+                </div>
+              )}
+              <pre className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed font-mono bg-gray-50 rounded-lg p-4 border border-gray-100">
+                {promptVorschau.prompt}
+              </pre>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
+              <button
+                onClick={() => setPromptVorschau(null)}
+                className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={async () => {
+                  const { prompt, imageUrls, pdfUrls } = promptVorschau;
+                  setPromptVorschau(null);
+                  await sendeAnKI(prompt, imageUrls, pdfUrls);
+                }}
+                className="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Bestätigen & an KI senden
+              </button>
             </div>
           </div>
         </div>
